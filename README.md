@@ -4,7 +4,7 @@
 
 This project implements a comprehensive tennis match analysis system using computer vision techniques. It detects players and the ball in tennis match videos, tracks their movements, and visualizes them on both the actual court and a simplified mini-court representation for easier analysis.
 
-![Tennis Detection System](output_videos/output_preview.jpg)
+![Tennis Detection System](output_image.png)
 
 ## Key Features
 
