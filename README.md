@@ -103,4 +103,4 @@ python main.py
 
 ## License
 
-This project is licensed under the MIT License - see the ![LICENSE](https://github.com/HarshTomar1234/Tennis-Vision?tab=MIT-1-ov-file) for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/HarshTomar1234/Tennis-Vision?tab=MIT-1-ov-file) for details.
