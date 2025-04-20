@@ -2,16 +2,21 @@ from utils import (read_video,
                    save_video,
                    measure_distance_between_points,
                    draw_player_stats,
-                   convert_pixel_distance_to_meters
+                   convert_pixel_distance_to_meters,
+                   ShotClassifier,
+                   draw_shot_classifications
                    )
 import cv2
 import constants
+import os
 from trackers import PlayerTracker, BallTracker
 from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
 import pandas as pd
 from copy import deepcopy
 
+# Feature toggle flags
+ENABLE_SHOT_CLASSIFICATION = True  # Set to False to disable shot classification
 
 def main():
     try:
@@ -56,6 +61,19 @@ def main():
         print("Converting to mini court coordinates...")
         player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
             player_detections, ball_detections, court_keypoints)
+
+        # NEW: Shot Classification (if enabled)
+        shot_classifications = {}
+        if ENABLE_SHOT_CLASSIFICATION:
+            print("Classifying shots...")
+            shot_classifier = ShotClassifier()
+            shot_classifications = shot_classifier.classify_shots(
+                player_mini_court_detections, 
+                ball_mini_court_detections, 
+                ball_shot_frames,
+                mini_court.court_height
+            )
+            print(f"Classified {len(shot_classifications)} shots")
 
         player_stats_data  = [{
             "frame_num": 0,
@@ -113,6 +131,11 @@ def main():
 
             current_player_stats[f"player_{opponent_player_id}_total_player_speed"] += speed_of_opponent_player
             current_player_stats[f"player_{opponent_player_id}_last_player_speed"] = speed_of_opponent_player
+
+            # NEW: Add shot type to player stats if enabled
+            if ENABLE_SHOT_CLASSIFICATION and start_frame in shot_classifications:
+                shot_type = shot_classifications[start_frame]['shot_type']
+                current_player_stats[f"player_{player_shot_ball}_shot_type"] = shot_type
 
             player_stats_data.append(current_player_stats)
 
@@ -194,11 +217,35 @@ def main():
             if i in ball_shot_frames:
                 cv2.putText(frame, "BALL SHOT!",(10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
+        # NEW: Add shot classification overlays if enabled
+        if ENABLE_SHOT_CLASSIFICATION:
+            print("Adding shot classification overlays...")
+            output_video_frames = draw_shot_classifications(output_video_frames, shot_classifications, ball_shot_frames)
+
         # Save output video
         print("Saving output video...")
-        save_video(output_video_frames, "output_videos/output_video.avi")
+        output_video_path = "output_videos/output_video.avi"
         
-        print("Processing complete! Video saved to output_videos/output_video.avi")
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
+        
+        # Save video with additional error handling
+        success = save_video(output_video_frames, output_video_path)
+        
+        if success:
+            print(f"Processing complete! Video saved to {output_video_path}")
+        else:
+            print(f"ERROR: Failed to save video to {output_video_path}")
+            
+            # Try alternative format as fallback
+            print("Attempting to save as MP4 instead...")
+            output_video_path_mp4 = "output_videos/output_video.mp4"
+            success_mp4 = save_video(output_video_frames, output_video_path_mp4)
+            
+            if success_mp4:
+                print(f"Successfully saved video as MP4 to {output_video_path_mp4}")
+            else:
+                print("CRITICAL ERROR: All video saving attempts failed.")
         
     except Exception as e:
         print(f"Error occurred: {str(e)}")
