@@ -221,4 +221,4 @@ This project builds upon research and implementations in computer vision and spo
 
 ## License
 
-This project is licensed under the MIT License - see the !LICENSE[LICENSE] file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
