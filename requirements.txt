@@ -13,3 +13,7 @@ ultralytics>=8.0.0  # For YOLOv8
 # Visualization
 matplotlib>=3.5.0
 seaborn>=0.11.0
+
+# Additional dependencies for cricket analysis
+scikit-learn>=1.0.0  # For advanced analytics
+scipy>=1.7.0         # For signal processing
