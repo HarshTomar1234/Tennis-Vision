@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Tennis-Vision! This document prov
 1. **Fork the repository**
    ```bash
    # Fork on GitHub, then clone your fork
-   git clone https://github.com/YOUR_USERNAME/Tennis-Vision.git
+   git clone https://github.com/HarshTomar1234/Tennis-Vision.git
    cd Tennis-Vision
    ```
 
