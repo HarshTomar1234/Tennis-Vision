@@ -1,12 +1,15 @@
 import numpy as np
 from utils import measure_distance_between_points, measure_xy_distance
 import pandas as pd
+from typing import Dict, List, Optional, Any
 
 class ShotClassifier:
     """
     A professional shot classifier for tennis match analysis.
     Categorizes shots as serve, forehand, backhand, volley, or smash.
-    Based on player position, ball trajectory, and timing.
+    Based on player position, ball trajectory, and optionally pose data.
+    
+    Version 2.0: Supports pose-aware classification for improved accuracy.
     """
     
     def __init__(self):
@@ -28,10 +31,26 @@ class ShotClassifier:
             self.SHOT_TYPES['SMASH']: (0, 0, 255)        # Red
         }
         
-        # Shot classification thresholds
+        # Shot classification thresholds (position-based)
         self.VOLLEY_DISTANCE_THRESHOLD = 150  # Distance from net for volley detection
         self.SMASH_HEIGHT_THRESHOLD = 0.7     # Relative height threshold for smash detection
         self.NET_Y_POSITION_RELATIVE = 0.5    # Relative position of the net (middle of court)
+        
+        # Pose-aware thresholds (NEW in v2.0)
+        self.ARM_OVERHEAD_THRESHOLD = 0.2     # Wrist above head threshold (relative to body height)
+        self.ARM_EXTENDED_ANGLE_MIN = 140     # Arm angle for extended position (degrees)
+        self.BACKHAND_CROSS_BODY_RATIO = 0.3  # Wrist crosses body center ratio
+        
+        # Keypoint indices (COCO format)
+        self.KPT_NOSE = 0
+        self.KPT_LEFT_SHOULDER = 5
+        self.KPT_RIGHT_SHOULDER = 6
+        self.KPT_LEFT_ELBOW = 7
+        self.KPT_RIGHT_ELBOW = 8
+        self.KPT_LEFT_WRIST = 9
+        self.KPT_RIGHT_WRIST = 10
+        self.KPT_LEFT_HIP = 11
+        self.KPT_RIGHT_HIP = 12
         
     def classify_shots(self, player_mini_court_detections, ball_mini_court_detections, 
                       ball_shot_frames, mini_court_height):
@@ -147,6 +166,250 @@ class ShotClassifier:
     def get_shot_color(self, shot_type):
         """Get the color associated with a shot type for visualization"""
         return self.SHOT_COLORS.get(shot_type, (255, 255, 255))  # Default to white
+    
+    def classify_shots_with_pose(
+        self,
+        player_mini_court_detections: Dict[int, Dict[int, Any]],
+        ball_mini_court_detections: Dict[int, Dict[int, Any]],
+        ball_shot_frames: List[int],
+        mini_court_height: float,
+        player_poses: Optional[List[Dict[int, np.ndarray]]] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Classify shots using both position and pose data for improved accuracy.
+        
+        This method enhances the basic position-based classification by analyzing
+        player pose keypoints to detect:
+        - Serve/Smash: Arm in overhead position
+        - Backhand: Wrist crosses body center
+        - Forehand: Arm extended on dominant side
+        
+        Args:
+            player_mini_court_detections: Player positions on mini court
+            ball_mini_court_detections: Ball positions on mini court
+            ball_shot_frames: List of frame numbers where shots occur
+            mini_court_height: Height of mini court for relative positioning
+            player_poses: Optional pose data from PoseTracker
+            
+        Returns:
+            Dictionary mapping shot frame to classification with confidence
+        """
+        # If no pose data, fall back to position-based classification
+        if player_poses is None:
+            return self.classify_shots(
+                player_mini_court_detections,
+                ball_mini_court_detections,
+                ball_shot_frames,
+                mini_court_height
+            )
+        
+        shot_classifications = {}
+        
+        if len(ball_shot_frames) <= 1:
+            return shot_classifications
+        
+        for i in range(len(ball_shot_frames) - 1):
+            shot_frame = ball_shot_frames[i]
+            next_shot_frame = ball_shot_frames[i + 1]
+            
+            # Get player who made the shot
+            player_positions = player_mini_court_detections.get(shot_frame, {})
+            ball_data = ball_mini_court_detections.get(shot_frame, {})
+            
+            if not player_positions or not ball_data.get(1):
+                continue
+            
+            ball_pos = ball_data[1]
+            player_shot_id = min(
+                player_positions.keys(),
+                key=lambda x: measure_distance_between_points(player_positions[x], ball_pos)
+            )
+            
+            player_pos = player_positions[player_shot_id]
+            player_y = player_pos[1]
+            
+            # Get ball trajectory
+            ball_trajectory_y = 0
+            if shot_frame in ball_mini_court_detections and next_shot_frame in ball_mini_court_detections:
+                ball_start = ball_mini_court_detections[shot_frame].get(1)
+                ball_end = ball_mini_court_detections[next_shot_frame].get(1)
+                if ball_start and ball_end:
+                    ball_trajectory_y = ball_end[1] - ball_start[1]
+            
+            # Get pose data if available
+            player_keypoints = None
+            if shot_frame < len(player_poses) and player_shot_id in player_poses[shot_frame]:
+                player_keypoints = player_poses[shot_frame][player_shot_id]
+            
+            # Classify with pose enhancement
+            shot_type, confidence, method = self._determine_shot_type_with_pose(
+                i=i,
+                player_id=player_shot_id,
+                player_y=player_y,
+                ball_trajectory_y=ball_trajectory_y,
+                mini_court_height=mini_court_height,
+                is_first_shot=(i == 0),
+                keypoints=player_keypoints
+            )
+            
+            shot_classifications[shot_frame] = {
+                'shot_type': shot_type,
+                'player_id': player_shot_id,
+                'frame_index': i,
+                'confidence': confidence,
+                'method': method  # 'pose' or 'position'
+            }
+        
+        return shot_classifications
+    
+    def _determine_shot_type_with_pose(
+        self,
+        i: int,
+        player_id: int,
+        player_y: float,
+        ball_trajectory_y: float,
+        mini_court_height: float,
+        is_first_shot: bool,
+        keypoints: Optional[np.ndarray] = None,
+    ):
+        """
+        Determine shot type using pose data when available.
+        
+        Returns:
+            Tuple of (shot_type, confidence, method)
+        """
+        net_y = mini_court_height * self.NET_Y_POSITION_RELATIVE
+        
+        # First shot is always a serve
+        if is_first_shot:
+            return self.SHOT_TYPES['SERVE'], 0.95, 'position'
+        
+        # If we have pose data, use it for enhanced classification
+        if keypoints is not None and self._has_valid_keypoints(keypoints):
+            pose_result = self._analyze_pose_for_shot(keypoints)
+            
+            if pose_result['arm_overhead']:
+                # Overhead arm = serve or smash
+                if is_first_shot:
+                    return self.SHOT_TYPES['SERVE'], 0.98, 'pose'
+                else:
+                    return self.SHOT_TYPES['SMASH'], 0.92, 'pose'
+            
+            if pose_result['backhand_detected']:
+                return self.SHOT_TYPES['BACKHAND'], 0.88, 'pose'
+            
+            if pose_result['forehand_detected']:
+                return self.SHOT_TYPES['FOREHAND'], 0.88, 'pose'
+        
+        # Fall back to position-based classification
+        # Check for volley
+        if abs(player_y - net_y) < self.VOLLEY_DISTANCE_THRESHOLD:
+            return self.SHOT_TYPES['VOLLEY'], 0.85, 'position'
+        
+        # Check for smash
+        if ball_trajectory_y > 0 and ball_trajectory_y > mini_court_height * self.SMASH_HEIGHT_THRESHOLD:
+            return self.SHOT_TYPES['SMASH'], 0.80, 'position'
+        
+        # Determine forehand/backhand based on position
+        if player_id == 1:
+            if player_y > net_y and ball_trajectory_y < 0:
+                return self.SHOT_TYPES['BACKHAND'], 0.75, 'position'
+            else:
+                return self.SHOT_TYPES['FOREHAND'], 0.75, 'position'
+        else:
+            if player_y < net_y and ball_trajectory_y > 0:
+                return self.SHOT_TYPES['BACKHAND'], 0.75, 'position'
+            else:
+                return self.SHOT_TYPES['FOREHAND'], 0.75, 'position'
+    
+    def _has_valid_keypoints(self, keypoints: np.ndarray, min_confidence: float = 0.3) -> bool:
+        """Check if keypoints have sufficient confidence for analysis."""
+        # Need at least shoulders and one wrist
+        required_indices = [
+            self.KPT_LEFT_SHOULDER, self.KPT_RIGHT_SHOULDER,
+        ]
+        optional_indices = [
+            self.KPT_LEFT_WRIST, self.KPT_RIGHT_WRIST
+        ]
+        
+        # All required must be visible
+        for idx in required_indices:
+            if keypoints[idx][2] < min_confidence:
+                return False
+        
+        # At least one wrist must be visible
+        wrist_visible = any(keypoints[idx][2] >= min_confidence for idx in optional_indices)
+        return wrist_visible
+    
+    def _analyze_pose_for_shot(self, keypoints: np.ndarray) -> Dict[str, Any]:
+        """
+        Analyze pose keypoints to determine shot characteristics.
+        
+        Returns:
+            Dictionary with pose analysis results
+        """
+        result = {
+            'arm_overhead': False,
+            'backhand_detected': False,
+            'forehand_detected': False,
+            'dominant_arm': None,
+            'arm_extension': 0.0,
+        }
+        
+        # Get body landmarks
+        nose = keypoints[self.KPT_NOSE][:2]
+        left_shoulder = keypoints[self.KPT_LEFT_SHOULDER][:2]
+        right_shoulder = keypoints[self.KPT_RIGHT_SHOULDER][:2]
+        left_wrist = keypoints[self.KPT_LEFT_WRIST]
+        right_wrist = keypoints[self.KPT_RIGHT_WRIST]
+        left_hip = keypoints[self.KPT_LEFT_HIP][:2] if keypoints[self.KPT_LEFT_HIP][2] > 0.3 else None
+        right_hip = keypoints[self.KPT_RIGHT_HIP][:2] if keypoints[self.KPT_RIGHT_HIP][2] > 0.3 else None
+        
+        # Calculate body center
+        body_center_x = (left_shoulder[0] + right_shoulder[0]) / 2
+        shoulder_width = abs(right_shoulder[0] - left_shoulder[0])
+        
+        # Determine which wrist is more active (higher confidence = more visible)
+        left_conf = left_wrist[2]
+        right_conf = right_wrist[2]
+        
+        if right_conf > left_conf:
+            active_wrist = right_wrist[:2]
+            active_wrist_conf = right_conf
+            result['dominant_arm'] = 'right'
+        else:
+            active_wrist = left_wrist[:2]
+            active_wrist_conf = left_conf
+            result['dominant_arm'] = 'left'
+        
+        if active_wrist_conf < 0.3:
+            return result  # Not enough confidence
+        
+        # Check for overhead position (serve/smash)
+        # Wrist Y is above (smaller than) nose Y
+        if active_wrist[1] < nose[1]:
+            result['arm_overhead'] = True
+            return result  # Overhead takes priority
+        
+        # Check for backhand (wrist crosses body center)
+        # For right-handed: left wrist on right side of body
+        # For left-handed: right wrist on left side of body
+        cross_body_threshold = shoulder_width * self.BACKHAND_CROSS_BODY_RATIO
+        
+        if result['dominant_arm'] == 'right':
+            # Check if right wrist is significantly to the left of body center
+            if active_wrist[0] < body_center_x - cross_body_threshold:
+                result['backhand_detected'] = True
+            else:
+                result['forehand_detected'] = True
+        else:
+            # Check if left wrist is significantly to the right of body center
+            if active_wrist[0] > body_center_x + cross_body_threshold:
+                result['backhand_detected'] = True
+            else:
+                result['forehand_detected'] = True
+        
+        return result
 
 
 def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
