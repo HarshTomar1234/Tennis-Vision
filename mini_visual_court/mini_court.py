@@ -8,9 +8,18 @@ from utils import convert_meters_to_pixel_distance, convert_pixel_distance_to_me
 
 
 class MiniCourt():
-    def __init__(self, frame, mini_court_width=None, mini_court_height=None):
+    def __init__(self, frame, mini_court_width=None, mini_court_height=None, layout_params=None):
         """
-        Initialize mini court with enhanced styling and dimensions
+        Initialize mini court with enhanced styling and dimensions.
+        
+        CAMERA-ROBUST: Now supports dynamic positioning via layout_params.
+        
+        Args:
+            frame: The video frame to base dimensions on
+            mini_court_width: Optional fixed width (overridden by layout_params)
+            mini_court_height: Optional fixed height (overridden by layout_params)
+            layout_params: Optional dict from UILayoutManager.get_mini_court_params()
+                          If provided, uses dynamic positioning
         """
         frame_height, frame_width = frame.shape[:2]
         self.frame_width = frame_width
@@ -20,15 +29,35 @@ class MiniCourt():
         self.court_width = frame_width  # Full court width in pixels
         self.court_height = frame_height  # Full court height in pixels
         
-        # Mini court dimensions
-        self.mini_court_width = mini_court_width if mini_court_width else int(frame_width * 0.2)
-        self.mini_court_height = mini_court_height if mini_court_height else int(self.mini_court_width * 1.5)
+        # CAMERA-ROBUST: Use layout params if provided, otherwise calculate dynamically
+        if layout_params is not None:
+            # Use provided layout parameters
+            self.mini_court_width = layout_params['width']
+            self.mini_court_height = layout_params['height']
+            self.drawing_rectangle_width = layout_params['width']
+            self.drawing_rectangle_height = layout_params['height']
+            self.buffer = 10  # Small buffer when using layout manager
+            
+            # Override canvas position directly from layout
+            self._layout_start_x = layout_params['start_x']
+            self._layout_start_y = layout_params['start_y']
+            self._use_layout_position = True
+        else:
+            # Dynamic calculation based on frame dimensions
+            # Mini court dimensions scale with frame size
+            self.mini_court_width = mini_court_width if mini_court_width else int(frame_width * 0.18)  # Increased from 0.15
+            self.mini_court_height = mini_court_height if mini_court_height else int(self.mini_court_width * 2.2)  # Increased from 2.0
+            
+            # Ensure minimum sizes for readability (increased minimums)
+            self.mini_court_width = max(self.mini_court_width, 180)  # Increased from 150
+            self.mini_court_height = max(self.mini_court_height, 360)  # Increased from 300
+            
+            self.drawing_rectangle_width = self.mini_court_width + 30  # More padding
+            self.drawing_rectangle_height = self.mini_court_height + 30  # More padding
+            self.buffer = max(25, int(min(frame_width, frame_height) * 0.035))  # More buffer
+            self._use_layout_position = False
         
-        self.drawing_rectangle_width = 250
-        self.drawing_rectangle_height = 500
-        self.buffer = 50 
-        self.padding_court = 20
-
+        self.padding_court = 15  # Increased from 10
 
         self.set_canvas_background_box_position(frame)
         self.set_mini_court_position()
@@ -116,21 +145,35 @@ class MiniCourt():
 
 
 
-
     def set_mini_court_position(self):
+        # Court drawing stays in the center as before
         self.court_start_x = self.start_x + self.padding_court
         self.court_start_y = self.start_y + self.padding_court
         self.court_end_x = self.end_x - self.padding_court
         self.court_end_y = self.end_y - self.padding_court
         self.court_drawing_width = self.court_end_x - self.court_start_x
-        self.court_height = self.court_end_y - self.court_start_y  # Add the missing court_height attribute
+        self.court_height = self.court_end_y - self.court_start_y
+        
+        # EXTENDED PLAYING AREA: Allow players/ball to appear outside court lines
+        # This creates virtual zones above/below the baseline for players behind baseline
+        self.baseline_extension = 30  # Pixels beyond court where players can be
+        self.playing_area_start_y = self.start_y  # Full top (can show players above court)
+        self.playing_area_end_y = self.end_y  # Full bottom (can show players below court)
       
 
     def set_canvas_background_box_position(self, frame):
-        self.end_x = frame.shape[1] - self.buffer
-        self.end_y = self.buffer + self.drawing_rectangle_height 
-        self.start_x = self.end_x - self.drawing_rectangle_width
-        self.start_y = self.end_y - self.drawing_rectangle_height
+        # CAMERA-ROBUST: Use layout manager position if available
+        if hasattr(self, '_use_layout_position') and self._use_layout_position:
+            self.start_x = self._layout_start_x
+            self.start_y = self._layout_start_y
+            self.end_x = self.start_x + self.drawing_rectangle_width
+            self.end_y = self.start_y + self.drawing_rectangle_height
+        else:
+            # Default positioning (top-right corner)
+            self.end_x = frame.shape[1] - self.buffer
+            self.end_y = self.buffer + self.drawing_rectangle_height 
+            self.start_x = self.end_x - self.drawing_rectangle_width
+            self.start_y = self.end_y - self.drawing_rectangle_height
 
 
     def draw_court(self,frame):
@@ -291,14 +334,41 @@ class MiniCourt():
         - Improved real-time synchronization between actual and mini court
         - Better ball position tracking relative to player positions
         - More accurate coordinate transformation
+        
+        CAMERA-ROBUST: Now supports per-frame keypoints for handling camera motion.
+        Args:
+            court_keypoints: Either a single keypoints array (old behavior) OR
+                           a list of keypoints arrays, one per frame (camera-robust)
         """
         output_player_boxes_dict = {}
         output_ball_boxes_dict = {}
+        
+        # CAMERA-ROBUST: Determine if we have per-frame keypoints or single keypoints
+        # If it's a list of arrays (list of lists), it's per-frame
+        # If it's a single flat array/list, it's single-frame
+        is_per_frame_keypoints = False
+        if isinstance(court_keypoints, list) and len(court_keypoints) > 0:
+            # Check if first element is also a list/array (per-frame) or a number (single)
+            first_elem = court_keypoints[0]
+            if hasattr(first_elem, '__len__') and not isinstance(first_elem, (int, float)):
+                is_per_frame_keypoints = True
+        
+        if is_per_frame_keypoints:
+            print("  [CAMERA-ROBUST] Using per-frame keypoints for coordinate transformation")
         
         # Process each frame
         for frame_num in range(len(player_boxes)):
             frame_player_boxes = player_boxes[frame_num]
             frame_ball_boxes = ball_boxes[frame_num] if frame_num < len(ball_boxes) else {}
+            
+            # CAMERA-ROBUST: Get the correct keypoints for this frame
+            if is_per_frame_keypoints:
+                if frame_num < len(court_keypoints):
+                    current_keypoints = court_keypoints[frame_num]
+                else:
+                    current_keypoints = court_keypoints[-1]  # Use last available
+            else:
+                current_keypoints = court_keypoints  # Same keypoints for all frames (old behavior)
             
             # Initialize frame dictionaries
             output_player_boxes_dict[frame_num] = {}
@@ -311,10 +381,11 @@ class MiniCourt():
                     foot_x, foot_y = self.get_foot_position(bbox)
                     
                     # Find the closest court keypoint to determine player's court position
+                    # CAMERA-ROBUST: Uses current frame's keypoints
                     closest_keypoint_index = self.get_closest_keypoint_index(
                         (foot_x, foot_y), 
-                        court_keypoints, 
-                        allowed_indices=range(len(court_keypoints) // 2)
+                        current_keypoints, 
+                        allowed_indices=range(len(current_keypoints) // 2)
                     )
                     
                     # Get the corresponding mini court coordinate
@@ -322,24 +393,27 @@ class MiniCourt():
                     mini_court_y = self.drawing_key_points[closest_keypoint_index * 2 + 1]
                     
                     # Calculate offset based on player's position relative to the keypoint
-                    kp_x = court_keypoints[closest_keypoint_index * 2]
-                    kp_y = court_keypoints[closest_keypoint_index * 2 + 1]
+                    # CAMERA-ROBUST: Uses current frame's keypoints
+                    kp_x = current_keypoints[closest_keypoint_index * 2]
+                    kp_y = current_keypoints[closest_keypoint_index * 2 + 1]
                     
                     # Calculate normalized offset (0-1 range)
                     offset_x_norm = (foot_x - kp_x) / max(self.court_width, 1)
                     offset_y_norm = (foot_y - kp_y) / max(self.court_height, 1)
                     
                     # Scale offset to mini court dimensions
+                    # Y offset is scaled 1.4x to allow positions BEYOND baseline
                     offset_x_mini = offset_x_norm * self.mini_court_width
-                    offset_y_mini = offset_y_norm * self.mini_court_height
+                    offset_y_mini = offset_y_norm * self.mini_court_height * 1.4  # Extended for behind-baseline
                     
                     # Apply offset to mini court position
                     mini_court_x += offset_x_mini
                     mini_court_y += offset_y_mini
                     
-                    # Ensure position is within mini court boundaries
+                    # Ensure position is within PLAYING AREA (extends beyond court lines)
+                    # X stays within court, Y can be in baseline extension zones
                     mini_court_x = max(self.start_x, min(self.end_x, mini_court_x))
-                    mini_court_y = max(self.start_y, min(self.end_y, mini_court_y))
+                    mini_court_y = max(self.playing_area_start_y, min(self.playing_area_end_y, mini_court_y))
                     
                     # Store the mini court position
                     output_player_boxes_dict[frame_num][player_id] = (mini_court_x, mini_court_y)
@@ -358,10 +432,11 @@ class MiniCourt():
                     ball_y = (bbox[1] + bbox[3]) / 2
                     
                     # Find the closest court keypoint
+                    # CAMERA-ROBUST: Uses current frame's keypoints
                     closest_keypoint_index = self.get_closest_keypoint_index(
                         (ball_x, ball_y), 
-                        court_keypoints, 
-                        allowed_indices=range(len(court_keypoints) // 2)
+                        current_keypoints, 
+                        allowed_indices=range(len(current_keypoints) // 2)
                     )
                     
                     # Get the corresponding mini court coordinate
@@ -369,8 +444,9 @@ class MiniCourt():
                     mini_court_y = self.drawing_key_points[closest_keypoint_index * 2 + 1]
                     
                     # Calculate offset based on ball's position relative to the keypoint
-                    kp_x = court_keypoints[closest_keypoint_index * 2]
-                    kp_y = court_keypoints[closest_keypoint_index * 2 + 1]
+                    # CAMERA-ROBUST: Uses current frame's keypoints
+                    kp_x = current_keypoints[closest_keypoint_index * 2]
+                    kp_y = current_keypoints[closest_keypoint_index * 2 + 1]
                     
                     # Calculate normalized offset (0-1 range)
                     offset_x_norm = (ball_x - kp_x) / max(self.court_width, 1)
@@ -404,15 +480,23 @@ class MiniCourt():
                     if nearest_player is not None and min_distance < 150 and nearest_player in output_player_boxes_dict[frame_num]:
                         player_mini_x, player_mini_y = output_player_boxes_dict[frame_num][nearest_player]
                         
-                        # Very small offset for precise positioning (just 3-5 pixels)
-                        offset_x = 5 * (0.5 - random.random())  # Random offset between -2.5 and 2.5
-                        offset_y = 5 * (0.5 - random.random())  # Random offset between -2.5 and 2.5
+                        # Offset ball below and to the right of player to prevent overlap
+                        # This ensures both player dot and ball dot are visible
+                        offset_x = 12  # Fixed offset to the right
+                        offset_y = 15  # Fixed offset below player
                         
-                        mini_court_ball_position = (int(player_mini_x + offset_x), int(player_mini_y + offset_y))
+                        ball_x_pos = int(player_mini_x + offset_x)
+                        ball_y_pos = int(player_mini_y + offset_y)
+                        
+                        # BOUNDS CHECK: Ensure ball stays within PLAYING AREA
+                        ball_x_pos = max(self.start_x, min(self.end_x, ball_x_pos))
+                        ball_y_pos = max(self.playing_area_start_y, min(self.playing_area_end_y, ball_y_pos))
+                        
+                        mini_court_ball_position = (ball_x_pos, ball_y_pos)
                     else:
-                        # Ensure position is within mini court boundaries
+                        # Ensure position is within PLAYING AREA boundaries
                         mini_court_x = max(self.start_x, min(self.end_x, mini_court_x))
-                        mini_court_y = max(self.start_y, min(self.end_y, mini_court_y))
+                        mini_court_y = max(self.playing_area_start_y, min(self.playing_area_end_y, mini_court_y))
                         
                         mini_court_ball_position = (int(mini_court_x), int(mini_court_y))
                     
@@ -518,6 +602,9 @@ class MiniCourt():
             current_positions = []
             
             # Extract current frame positions
+            if frame_num not in positions:
+                continue
+                
             for obj_id, position in positions[frame_num].items():
                 try:
                     x, y = position
