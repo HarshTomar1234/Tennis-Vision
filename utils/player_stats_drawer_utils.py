@@ -1,7 +1,18 @@
 import numpy as np
 import cv2
 
-def draw_player_stats(output_video_frames, player_stats):
+def draw_player_stats(output_video_frames, player_stats, layout_params=None):
+    """
+    Draw player statistics overlay on video frames.
+    
+    CAMERA-ROBUST: Now supports dynamic positioning via layout_params.
+    
+    Args:
+        output_video_frames: List of video frames to draw on
+        player_stats: DataFrame with player statistics
+        layout_params: Optional dict from UILayoutManager.get_stats_panel_params()
+                      If None, uses dynamic calculation based on frame size
+    """
     # Check if shot classification data is available
     has_shot_classification = 'player_1_shot_type' in player_stats.columns or 'player_2_shot_type' in player_stats.columns
 
@@ -21,14 +32,31 @@ def draw_player_stats(output_video_frames, player_stats):
         player_2_shot_type = row.get('player_2_shot_type', 'N/A')
 
         frame = output_video_frames[index]
+        frame_height, frame_width = frame.shape[:2]
         
-        # Adjust height if we need to display shot types
-        width = 350
-        height = 250 if has_shot_classification else 200
+        # CAMERA-ROBUST: Dynamic positioning based on layout_params or frame size
+        if layout_params is not None:
+            # Use provided layout parameters
+            start_x = layout_params['start_x']
+            start_y = layout_params['start_y']
+            width = layout_params['width']
+            height = layout_params['height']
+        else:
+            # Dynamic calculation based on frame dimensions
+            # Width 450px to accommodate Player 2 column with km/h text
+            width = max(450, int(frame_width * 0.42))  # Minimum 450px
+            height = 250 if has_shot_classification else 200
+            
+            # Position at the bottom center, with dynamic Y based on frame height
+            start_x = (frame_width - width) // 2  # Center horizontally
+            
+            # Position stats panel in lower portion of frame (last 40%)
+            start_y = int(frame_height * 0.65)
+            
+            # Ensure it fits within frame
+            if start_y + height > frame_height - 10:
+                start_y = frame_height - height - 10
         
-        # Position at the bottom center (Vienna logo area)
-        start_x = frame.shape[1]//2 - width//2  # Center horizontally
-        start_y = 450  # Position at Vienna text area
         end_x = start_x + width
         end_y = start_y + height
 
@@ -45,12 +73,16 @@ def draw_player_stats(output_video_frames, player_stats):
         cv2.putText(frame, "PLAYER STATS", (start_x + 110, start_y + 27), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
-        # Add column headers
-        cv2.putText(frame, "Metric", (start_x + 15, start_y + 65), 
+        # Add column headers - dynamic positioning based on width
+        col1_x = start_x + 15           # Metric column
+        col2_x = start_x + int(width * 0.35)   # Player 1 column (~35% of width)
+        col3_x = start_x + int(width * 0.65)   # Player 2 column (~65% of width)
+        
+        cv2.putText(frame, "Metric", (col1_x, start_y + 65), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-        cv2.putText(frame, "Player 1", (start_x + 150, start_y + 65), 
+        cv2.putText(frame, "Player 1", (col2_x, start_y + 65), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-        cv2.putText(frame, "Player 2", (start_x + 250, start_y + 65), 
+        cv2.putText(frame, "Player 2", (col3_x, start_y + 65), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
         
         # Add horizontal divider
@@ -58,48 +90,48 @@ def draw_player_stats(output_video_frames, player_stats):
         
         # Shot Speed row
         y_pos = start_y + 100
-        cv2.putText(frame, "Shot Speed", (start_x + 15, y_pos), 
+        cv2.putText(frame, "Shot Speed", (col1_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{player_1_shot_speed:.1f} km/h", (start_x + 150, y_pos), 
+        cv2.putText(frame, f"{player_1_shot_speed:.1f} km/h", (col2_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{player_2_shot_speed:.1f} km/h", (start_x + 250, y_pos), 
+        cv2.putText(frame, f"{player_2_shot_speed:.1f} km/h", (col3_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # Player Speed row
         y_pos = start_y + 130
-        cv2.putText(frame, "Player Speed", (start_x + 15, y_pos), 
+        cv2.putText(frame, "Player Speed", (col1_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{player_1_speed:.1f} km/h", (start_x + 150, y_pos), 
+        cv2.putText(frame, f"{player_1_speed:.1f} km/h", (col2_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{player_2_speed:.1f} km/h", (start_x + 250, y_pos), 
+        cv2.putText(frame, f"{player_2_speed:.1f} km/h", (col3_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # Avg Shot Speed row
         y_pos = start_y + 160
-        cv2.putText(frame, "Avg. S. Speed", (start_x + 15, y_pos), 
+        cv2.putText(frame, "Avg. S. Speed", (col1_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{avg_player_1_shot_speed:.1f} km/h", (start_x + 150, y_pos), 
+        cv2.putText(frame, f"{avg_player_1_shot_speed:.1f} km/h", (col2_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{avg_player_2_shot_speed:.1f} km/h", (start_x + 250, y_pos), 
+        cv2.putText(frame, f"{avg_player_2_shot_speed:.1f} km/h", (col3_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # Avg Player Speed row
         y_pos = start_y + 190
-        cv2.putText(frame, "Avg. P. Speed", (start_x + 15, y_pos), 
+        cv2.putText(frame, "Avg. P. Speed", (col1_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{avg_player_1_speed:.1f} km/h", (start_x + 150, y_pos), 
+        cv2.putText(frame, f"{avg_player_1_speed:.1f} km/h", (col2_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"{avg_player_2_speed:.1f} km/h", (start_x + 250, y_pos), 
+        cv2.putText(frame, f"{avg_player_2_speed:.1f} km/h", (col3_x, y_pos), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # Add shot type information if shot classification is enabled
         if has_shot_classification:
             y_pos = start_y + 220
-            cv2.putText(frame, "Last Shot Type", (start_x + 15, y_pos), 
+            cv2.putText(frame, "Last Shot Type", (col1_x, y_pos), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(frame, f"{player_1_shot_type}", (start_x + 150, y_pos), 
+            cv2.putText(frame, f"{player_1_shot_type}", (col2_x, y_pos), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(frame, f"{player_2_shot_type}", (start_x + 250, y_pos), 
+            cv2.putText(frame, f"{player_2_shot_type}", (col3_x, y_pos), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         output_video_frames[index] = frame
