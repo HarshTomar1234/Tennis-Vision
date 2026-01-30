@@ -4,7 +4,8 @@ from utils import (read_video,
                    draw_player_stats,
                    convert_pixel_distance_to_meters,
                    ShotClassifier,
-                   draw_shot_classifications
+                   draw_shot_classifications,
+                   UILayoutManager
                    )
 import cv2
 import constants
@@ -17,11 +18,13 @@ from copy import deepcopy
 
 # Feature toggle flags
 ENABLE_SHOT_CLASSIFICATION = True  # Set to False to disable shot classification
+ENABLE_PER_FRAME_KEYPOINTS = True  # Set to True for camera-robust detection (slower but more accurate)
+USE_BYTETRACK = True  # Set to True for smooth ball trajectory with Kalman filter
 
 def main():
     try:
         # Reading video frames
-        input_video_path = "input_videos/input_video.mp4"
+        input_video_path = "input_videos/input_video_2.mp4"
         video_frames = read_video(input_video_path)
         print(f"Loaded {len(video_frames)} frames from {input_video_path}")
 
@@ -33,7 +36,19 @@ def main():
         player_detections = player_tracker.detect_frames(video_frames, read_from_stub=True, stub_path="tracker_stubs/player_detections.pkl")
         
         print("Detecting ball...")
-        ball_detections = ball_tracker.detect_frames(video_frames, read_from_stub=True, stub_path="tracker_stubs/ball_detections.pkl")
+        if USE_BYTETRACK:
+            print("[BYTETRACK MODE] Using Kalman filter for smooth ball trajectory...")
+            ball_detections = ball_tracker.detect_frames_with_tracking(
+                video_frames, 
+                read_from_stub=False,  # Must be False to use tracking
+                stub_path="tracker_stubs/ball_detections_tracked.pkl"
+            )
+        else:
+            ball_detections = ball_tracker.detect_frames(
+                video_frames, 
+                read_from_stub=True, 
+                stub_path="tracker_stubs/ball_detections.pkl"
+            )
 
         print("Interpolating ball positions...")
         ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
@@ -42,15 +57,62 @@ def main():
         print("Detecting court lines...")
         court_model_path = "models/keypoints_model.pth"
         court_line_detector = CourtLineDetector(court_model_path)
-        court_keypoints = court_line_detector.predict(video_frames[0])
+        
+        # CAMERA-ROBUST: Detect keypoints per-frame or just first frame
+        if ENABLE_PER_FRAME_KEYPOINTS:
+            print("[CAMERA-ROBUST MODE] Detecting keypoints for ALL frames...")
+            print("Note: This takes longer but handles camera motion correctly.")
+            all_court_keypoints = court_line_detector.predict_all_frames(
+                video_frames, smooth=True, window_size=5
+            )
+            # For backward compatibility, also keep first frame's keypoints
+            court_keypoints = all_court_keypoints[0]
+        else:
+            print("[FAST MODE] Detecting keypoints for first frame only...")
+            court_keypoints = court_line_detector.predict(video_frames[0])
+            # Create list with same keypoints for all frames (old behavior)
+            all_court_keypoints = [court_keypoints] * len(video_frames)
 
         # Choose players
         print("Filtering players...")
         player_detections = player_tracker.choose_and_filter_players(player_detections, court_keypoints)
 
-        # MiniCourt
+        # Normalize player IDs to 1 and 2
+        # Use a list to ensure consistent ordering if needed, or simple iteration
+        first_frame_players = player_detections[0].keys()
+        # Sort to ensure consistent mapping across runs if needed, or just map as they appear
+        player_ids = sorted(list(first_frame_players)) 
+        
+        # We expect exactly 2 players after filtering, but let's handle cases safely
+        player_id_map = {}
+        for i, original_id in enumerate(player_ids):
+             # Map first ID to 1, second to 2. If more, ignore or map sequentially.
+             if i < 2:
+                player_id_map[original_id] = i + 1
+        
+        print(f"Mapping player IDs: {player_id_map}")
+
+        # Update player_detections with new IDs
+        normalized_player_detections = []
+        for frame_detections in player_detections:
+            normalized_frame = {}
+            for original_id, bbox in frame_detections.items():
+                if original_id in player_id_map:
+                    new_id = player_id_map[original_id]
+                    normalized_frame[new_id] = bbox
+            normalized_player_detections.append(normalized_frame)
+        
+        player_detections = normalized_player_detections
+
+        # CAMERA-ROBUST: Setup UI layout manager for dynamic positioning
+        print("Setting up dynamic UI layout...")
+        layout_manager = UILayoutManager(video_frames[0].shape, court_keypoints)
+        mini_court_params = layout_manager.get_mini_court_params()
+        stats_params = layout_manager.get_stats_panel_params()
+        
+        # MiniCourt with dynamic positioning
         print("Setting up mini court visualization...")
-        mini_court = MiniCourt(video_frames[0]) 
+        mini_court = MiniCourt(video_frames[0], layout_params=mini_court_params) 
 
         # Detect ball shots
         print("Detecting ball shots...")
@@ -58,9 +120,10 @@ def main():
         print(f"Detected ball shots at frames: {ball_shot_frames}")
 
         # Convert positions to mini court positions
+        # CAMERA-ROBUST: Now uses per-frame keypoints for accurate mapping
         print("Converting to mini court coordinates...")
         player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
-            player_detections, ball_detections, court_keypoints)
+            player_detections, ball_detections, all_court_keypoints)
 
         # NEW: Shot Classification (if enabled)
         shot_classifications = {}
@@ -109,19 +172,21 @@ def main():
 
             # Opponent player speed
             opponent_player_id = 1 if player_shot_ball == 2 else 2
+            speed_of_opponent_player = 0
 
-            distance_covered_by_opponent_player_pixels = measure_distance_between_points(
-                                                                                            player_mini_court_detections[start_frame][opponent_player_id],
-                                                                                            player_mini_court_detections[end_frame][opponent_player_id]
-                                                                                        )
+            if opponent_player_id in player_mini_court_detections[start_frame] and opponent_player_id in player_mini_court_detections[end_frame]: 
+                distance_covered_by_opponent_player_pixels = measure_distance_between_points(
+                                                                                                player_mini_court_detections[start_frame][opponent_player_id],
+                                                                                                player_mini_court_detections[end_frame][opponent_player_id]
+                                                                                            )
 
-            distance_covered_by_opponent_player_meters = convert_pixel_distance_to_meters(
-                distance_covered_by_opponent_player_pixels,
-                constants.DOUBLE_LINE_WIDTH,
-                mini_court.get_width_of_mini_court()
-            )
-            # Speed of the opponent player
-            speed_of_opponent_player = distance_covered_by_opponent_player_meters / ball_shot_time_in_seconds * 3.6  
+                distance_covered_by_opponent_player_meters = convert_pixel_distance_to_meters(
+                    distance_covered_by_opponent_player_pixels,
+                    constants.DOUBLE_LINE_WIDTH,
+                    mini_court.get_width_of_mini_court()
+                )
+                # Speed of the opponent player
+                speed_of_opponent_player = distance_covered_by_opponent_player_meters / ball_shot_time_in_seconds * 3.6  
 
             current_player_stats = deepcopy(player_stats_data[-1])
             current_player_stats["frame_num"] = start_frame
@@ -178,14 +243,18 @@ def main():
         print("Drawing ball bounding boxes...")
         output_video_frames = ball_tracker.draw_bboxes(output_video_frames, ball_detections, color=(0, 255, 255), thickness=2)
 
-        # Draw Player Stats
+        # Draw Player Stats with dynamic positioning
         print("Drawing player stats...")
-        output_video_frames = draw_player_stats(output_video_frames, player_state_data_df)
+        output_video_frames = draw_player_stats(output_video_frames, player_state_data_df, stats_params)
 
-        # Draw Court Keypoints - matching the keypoints that will be shown on mini court
+        # Draw Court Keypoints - CAMERA-ROBUST: Uses per-frame keypoints
         print("Drawing court keypoints...")
-        output_video_frames = court_line_detector.draw_keypoints_on_video(
-            output_video_frames, court_keypoints, point_color=(0, 140, 255), radius=5)
+        if ENABLE_PER_FRAME_KEYPOINTS:
+            output_video_frames = court_line_detector.draw_keypoints_on_video_dynamic(
+                output_video_frames, all_court_keypoints, point_color=(0, 140, 255), radius=5)
+        else:
+            output_video_frames = court_line_detector.draw_keypoints_on_video(
+                output_video_frames, court_keypoints, point_color=(0, 140, 255), radius=5)
 
         # ENHANCEMENT: Draw Mini Court with improved visual styling without labels
         print("Drawing mini court with enhanced styling...")
@@ -239,7 +308,7 @@ def main():
             
             # Try alternative format as fallback
             print("Attempting to save as MP4 instead...")
-            output_video_path_mp4 = "output_videos/output_video.mp4"
+            output_video_path_mp4 = "output_videos/output_video_2.mp4"
             success_mp4 = save_video(output_video_frames, output_video_path_mp4)
             
             if success_mp4:
