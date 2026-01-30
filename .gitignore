@@ -1,2 +1,34 @@
 node_modules/
 .env
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Model weights (large files)
+*.pt
+models/*.pt
+models/*.pth
+yolov8x.pt
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+**/__pycache__/
+
+# IDE
+.vscode/
+.idea/
+
+# Training runs and logs
+runs/
+runs/detect/train/
+
+# Roboflow training data (large)
+training/tennis-ball-detection-6/
+
+# OS files
+.DS_Store
+Thumbs.db
