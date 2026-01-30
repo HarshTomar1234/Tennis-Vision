@@ -192,11 +192,12 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
                 if len(player_shots[player_id]) > max_shots_to_display:
                     player_shots[player_id] = player_shots[player_id][:max_shots_to_display]
         
-        # Create shot statistics board - shifted to left side
-        board_width = 500
-        board_height = 170
-        board_x = 20  # Position on the left side
-        board_y = 450  # Near where the Vienna text is located
+        # Create shot statistics board - positioned at TOP LEFT (not bottom!)
+        # CAMERA-ROBUST: Move to top-left to avoid overlap with Player Stats
+        board_width = max(350, int(width * 0.32))  # Slightly smaller for top-left
+        board_height = 120  # Compact height
+        board_x = 10  # Left edge with small padding
+        board_y = height - 200  # Position above player stats area
         
         # Draw semi-transparent background
         overlay = frame.copy()
@@ -228,7 +229,7 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
             
             # Player name
             player_text = f"Player {player_id}"
-            cv2.putText(frame, player_text, (board_x + 30, y_pos), 
+            cv2.putText(frame, player_text, (board_x + 20, y_pos), 
                        font, font_scale, (255, 255, 255), thickness)
             
             # Recent shots with colors (smaller balls)
@@ -236,36 +237,39 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
             
             if not shots:
                 # If no shots yet, display N/A
-                cv2.putText(frame, "N/A", (board_x + 250, y_pos),
+                cv2.putText(frame, "N/A", (board_x + 150, y_pos),
                            font, font_scale, (150, 150, 150), 1)
             else:
-                # Display smaller shot indicators
+                # Display smaller shot indicators - adjust spacing to fit in board
                 for col, shot in enumerate(shots):
                     shot_type = shot['type']
                     shot_color = shot_classifier.get_shot_color(shot_type)
                     
-                    # Smaller shot bubble
-                    bubble_radius = 15  # Reduced size
-                    bubble_x = board_x + 220 + (col * 80)
+                    # Shot bubble - reduced spacing (50px instead of 80px)
+                    bubble_radius = 14
+                    bubble_x = board_x + 150 + (col * 55)  # Start at 150, space by 55
                     bubble_y = y_pos - 5
                     
-                    # Draw filled circle behind text
-                    cv2.circle(frame, (bubble_x, bubble_y), bubble_radius, shot_color, -1)
-                    cv2.circle(frame, (bubble_x, bubble_y), bubble_radius, (255, 255, 255), 1)  # White outline
-                    
-                    # Draw abbreviated shot text
-                    short_text = shot_type[:2].upper()  # Just first two letters
-                    text_size = cv2.getTextSize(short_text, font, font_scale-0.1, thickness)[0]
-                    text_x = bubble_x - text_size[0]//2
-                    text_y = bubble_y + text_size[1]//2
-                    cv2.putText(frame, short_text, (text_x, text_y), 
-                              font, font_scale-0.1, (0, 0, 0), thickness)
+                    # Ensure bubble stays within board bounds
+                    if bubble_x + bubble_radius < board_x + board_width - 10:
+                        # Draw filled circle behind text
+                        cv2.circle(frame, (bubble_x, bubble_y), bubble_radius, shot_color, -1)
+                        cv2.circle(frame, (bubble_x, bubble_y), bubble_radius, (255, 255, 255), 1)
+                        
+                        # Draw abbreviated shot text
+                        short_text = shot_type[:2].upper()
+                        text_size = cv2.getTextSize(short_text, font, font_scale-0.1, thickness)[0]
+                        text_x = bubble_x - text_size[0]//2
+                        text_y = bubble_y + text_size[1]//2
+                        cv2.putText(frame, short_text, (text_x, text_y), 
+                                  font, font_scale-0.1, (0, 0, 0), thickness)
         
-        # Add a legend for shot types at the bottom right
-        legend_x = width - 250
-        legend_y = height - 180
-        legend_width = 230
-        legend_height = 160
+        # Add a legend for shot types at the bottom right 
+        # CAMERA-ROBUST: Position to avoid overlapping with mini court and show all items
+        legend_width = 150
+        legend_height = 165  # Increased to fit 5 shot types
+        legend_x = width - legend_width - 10  # Right edge
+        legend_y = height - legend_height - 50  # Move up to avoid cutoff
         
         # Draw semi-transparent background for legend
         overlay = frame.copy()
