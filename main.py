@@ -20,6 +20,8 @@ from copy import deepcopy
 ENABLE_SHOT_CLASSIFICATION = True  # Set to False to disable shot classification
 ENABLE_PER_FRAME_KEYPOINTS = True  # Set to True for camera-robust detection (slower but more accurate)
 USE_BYTETRACK = True  # Set to True for smooth ball trajectory with Kalman filter
+ENABLE_POSE_TRACKING = True  # Set to True for pose estimation with BBoxMaskPose (v2.0)
+POSE_MODEL = 'vitpose-b'  # Options: 'vitpose-b', 'maskpose-b', 'pmpose'
 
 def main():
     try:
@@ -104,6 +106,37 @@ def main():
         
         player_detections = normalized_player_detections
 
+        # POSE TRACKING (v2.0): Detect player poses using BBoxMaskPose
+        player_poses = None
+        if ENABLE_POSE_TRACKING:
+            try:
+                from trackers import PoseTracker
+                print(f"\n[POSE TRACKING] Initializing {POSE_MODEL}...")
+                pose_tracker = PoseTracker(model=POSE_MODEL)
+                
+                print("[POSE TRACKING] Detecting poses for all players...")
+                player_poses = pose_tracker.detect_poses(
+                    video_frames,
+                    player_detections,
+                    read_from_stub=True,
+                    stub_path="tracker_stubs/pose_detections.pkl"
+                )
+                print(f"[POSE TRACKING] Detected poses for {len(player_poses)} frames\n")
+                
+                # Export pose data for external analysis
+                pose_tracker.export_pose_data(
+                    player_poses,
+                    "analysis/pose_data.csv",
+                    format='csv'
+                )
+            except ImportError as e:
+                print(f"[POSE TRACKING] Skipping - dependencies not installed: {e}")
+                print("[POSE TRACKING] Install with: pip install mmpose mmdet mmengine")
+                ENABLE_POSE_TRACKING_LOCAL = False
+            except Exception as e:
+                print(f"[POSE TRACKING] Skipping - error: {e}")
+                player_poses = None
+
         # CAMERA-ROBUST: Setup UI layout manager for dynamic positioning
         print("Setting up dynamic UI layout...")
         layout_manager = UILayoutManager(video_frames[0].shape, court_keypoints)
@@ -125,17 +158,30 @@ def main():
         player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
             player_detections, ball_detections, all_court_keypoints)
 
-        # NEW: Shot Classification (if enabled)
+        # Shot Classification (if enabled)
         shot_classifications = {}
         if ENABLE_SHOT_CLASSIFICATION:
             print("Classifying shots...")
             shot_classifier = ShotClassifier()
-            shot_classifications = shot_classifier.classify_shots(
-                player_mini_court_detections, 
-                ball_mini_court_detections, 
-                ball_shot_frames,
-                mini_court.court_height
-            )
+            
+            # Use pose-aware classification if pose data available
+            if player_poses is not None:
+                print("[POSE-AWARE] Using pose data for enhanced shot classification...")
+                shot_classifications = shot_classifier.classify_shots_with_pose(
+                    player_mini_court_detections, 
+                    ball_mini_court_detections, 
+                    ball_shot_frames,
+                    mini_court.court_height,
+                    player_poses
+                )
+            else:
+                # Fall back to position-based classification
+                shot_classifications = shot_classifier.classify_shots(
+                    player_mini_court_detections, 
+                    ball_mini_court_detections, 
+                    ball_shot_frames,
+                    mini_court.court_height
+                )
             print(f"Classified {len(shot_classifications)} shots")
 
         player_stats_data  = [{
@@ -238,6 +284,16 @@ def main():
         # Draw Player Bounding Boxes - with darker, more prominent outlines
         print("Drawing player bounding boxes...")
         output_video_frames = player_tracker.draw_bboxes(output_video_frames, player_detections, thickness=2)
+        
+        # Draw Player Skeletons (v2.0): Overlay pose skeletons on players
+        if ENABLE_POSE_TRACKING and player_poses is not None:
+            try:
+                print("Drawing player skeletons...")
+                output_video_frames = pose_tracker.draw_skeletons(
+                    output_video_frames, player_poses, thickness=2, radius=4
+                )
+            except Exception as e:
+                print(f"[POSE TRACKING] Skeleton drawing failed: {e}")
         
         # Draw Ball Bounding Boxes - with enhanced visibility
         print("Drawing ball bounding boxes...")
