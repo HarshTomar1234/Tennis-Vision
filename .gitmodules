@@ -1,0 +1,3 @@
+[submodule "external/BBoxMaskPose"]
+	path = external/BBoxMaskPose
+	url = https://github.com/MiraPurkrabek/BBoxMaskPose.git
