@@ -23,27 +23,167 @@ class PlayerTracker:
         return filtered_player_detections
 
 
-
     def choose_players(self, court_keypoints, player_dict):
-        distances = []
+        """
+        CAMERA-ROBUST V2: Enhanced player selection with OPPONENT SEPARATION.
+        
+        Key insight: Tennis players are at OPPOSITE ENDS of the court (top and bottom),
+        while ball boys and line judges are at the SIDES.
+        
+        New approach:
+        1. Score each candidate on multiple criteria
+        2. Select the best player from the BOTTOM half of court (near baseline)
+        3. Select the best player from the TOP half of court (far baseline)
+        4. This ensures we get actual opponents, not two ball boys!
+        """
+        if len(player_dict) < 2:
+            return list(player_dict.keys())
+        
+        # Calculate court bounds
+        court_bounds = self._estimate_court_bounds(court_keypoints)
+        court_mid_y = (court_bounds['top'] + court_bounds['bottom']) / 2
+        
+        # Score all candidates
+        candidates = []
         for track_id, bbox in player_dict.items():
+            x1, y1, x2, y2 = bbox
             player_center = get_center_of_bbox(bbox)
-
-            min_distance = float('inf')
-            for i in range(0, len(court_keypoints), 2):   # here step size is 2 because we are taking x and y coordinates of court keypoints alternatively
-                court_keypoint = (court_keypoints[i], court_keypoints[i+1])
-                distance = measure_distance_between_points(player_center, court_keypoint)
-                if distance < min_distance:  # here we are finding the minimum distance of player from court keypoints basically we are finding the nearest court keypoint from player
-                    min_distance = distance
-            distances.append((track_id, min_distance))   # here we are appending the track id and minimum distance of player from court keypoints
-
-
-        # Sort the distances in ascending order
-        distances.sort(key=lambda x: x[1])  # here the logic of using lambda x: x[1] is that we are sorting the distances based on the minimum distance of player from court keypoints and x is the list of track id and x[1] is the minimum distance of player from court keypoints
-
-        # Choose the top 2 track ids
-        chosen_players = [distances[0][0], distances[1][0]]  # here we are choosing the top 2 track ids based on the minimum distance of player from court keypoints
+            bbox_height = y2 - y1
+            bbox_width = x2 - x1
+            bbox_area = bbox_height * bbox_width
+            
+            score = 0
+            
+            # ====== CRITERION 1: Inside court bounds (+80 points) ======
+            if self._is_inside_court(player_center, court_bounds, margin=50):
+                score += 80
+            elif self._is_inside_court(player_center, court_bounds, margin=150):
+                score += 40
+            
+            # ====== CRITERION 2: Bounding box size (+60 points max) ======
+            # Real players appear LARGER than ball boys due to camera focus
+            area_score = min(bbox_area / 800, 60)
+            score += area_score
+            
+            # ====== CRITERION 3: Aspect ratio (+30 points) ======
+            aspect_ratio = bbox_height / max(bbox_width, 1)
+            if 1.5 <= aspect_ratio <= 4.0:
+                score += 30
+            elif 1.0 <= aspect_ratio <= 1.5:
+                score += 15
+            
+            # ====== CRITERION 4: Near baseline position (+50 points) ======
+            # Real players are at TOP or BOTTOM of court (baselines)
+            # Ball boys are at LEFT/RIGHT SIDES
+            player_y = player_center[1]
+            player_x = player_center[0]
+            
+            # Distance from horizontal center line (net)
+            distance_from_net_line = abs(player_y - court_mid_y)
+            court_half_height = (court_bounds['bottom'] - court_bounds['top']) / 2
+            
+            # Players at baseline have high Y-distance from net
+            baseline_score = 50 * (distance_from_net_line / court_half_height)
+            baseline_score = min(baseline_score, 50)  # Cap at 50
+            score += baseline_score
+            
+            # ====== CRITERION 5: X position near center (+40 points) ======
+            # Real players move along CENTER of court (left-right)
+            # Ball boys are at EXTREME left or right edges
+            court_center_x = (court_bounds['left'] + court_bounds['right']) / 2
+            court_half_width = (court_bounds['right'] - court_bounds['left']) / 2
+            distance_from_center_x = abs(player_x - court_center_x)
+            
+            # Lower distance from center X = higher score
+            x_center_score = 40 * (1 - min(distance_from_center_x / court_half_width, 1))
+            score += x_center_score
+            
+            # ====== CRITERION 6: Minimum size requirement (+20 points) ======
+            if bbox_height > 80 and bbox_width > 30:
+                score += 20
+            
+            # Determine if player is in top or bottom half
+            is_bottom_half = player_y > court_mid_y
+            
+            candidates.append({
+                'id': track_id,
+                'score': score,
+                'bbox': bbox,
+                'center': player_center,
+                'is_bottom_half': is_bottom_half
+            })
+        
+        # Debug output
+        print(f"  [PLAYER SELECTION V2] All candidates:")
+        for c in candidates:
+            half = "BOTTOM" if c['is_bottom_half'] else "TOP"
+            print(f"    ID {c['id']}: score={c['score']:.1f}, half={half}, center={c['center']}")
+        
+        # ====== OPPONENT SEPARATION: Select one from each half ======
+        bottom_candidates = [c for c in candidates if c['is_bottom_half']]
+        top_candidates = [c for c in candidates if not c['is_bottom_half']]
+        
+        # Sort each group by score
+        bottom_candidates.sort(key=lambda x: x['score'], reverse=True)
+        top_candidates.sort(key=lambda x: x['score'], reverse=True)
+        
+        chosen_players = []
+        
+        # Best from bottom half (near player)
+        if bottom_candidates:
+            chosen_players.append(bottom_candidates[0]['id'])
+            print(f"  [PLAYER SELECTION V2] Bottom half winner: ID {bottom_candidates[0]['id']} (score={bottom_candidates[0]['score']:.1f})")
+        
+        # Best from top half (far player)
+        if top_candidates:
+            chosen_players.append(top_candidates[0]['id'])
+            print(f"  [PLAYER SELECTION V2] Top half winner: ID {top_candidates[0]['id']} (score={top_candidates[0]['score']:.1f})")
+        
+        # Fallback: if we don't have players in both halves, take top 2 overall
+        if len(chosen_players) < 2:
+            print(f"  [PLAYER SELECTION V2] WARNING: Using fallback - not enough separation")
+            all_sorted = sorted(candidates, key=lambda x: x['score'], reverse=True)
+            chosen_players = [c['id'] for c in all_sorted[:2]]
+        
+        print(f"  [PLAYER SELECTION V2] Final chosen: {chosen_players}")
         return chosen_players
+    
+    def _estimate_court_bounds(self, court_keypoints):
+        """
+        Estimate the bounding box of the court from keypoints.
+        
+        Returns dict with: left, right, top, bottom, center, width, height
+        """
+        x_coords = [court_keypoints[i] for i in range(0, len(court_keypoints), 2)]
+        y_coords = [court_keypoints[i] for i in range(1, len(court_keypoints), 2)]
+        
+        left = min(x_coords)
+        right = max(x_coords)
+        top = min(y_coords)
+        bottom = max(y_coords)
+        
+        return {
+            'left': left,
+            'right': right,
+            'top': top,
+            'bottom': bottom,
+            'center': ((left + right) / 2, (top + bottom) / 2),
+            'width': right - left,
+            'height': bottom - top
+        }
+    
+    def _is_inside_court(self, point, court_bounds, margin=0):
+        """
+        Check if a point is inside the court bounds (with optional margin).
+        
+        Args:
+            point: (x, y) tuple
+            court_bounds: dict from _estimate_court_bounds
+            margin: pixels of margin outside court to still consider "inside"
+        """
+        x, y = point
+        return (court_bounds['left'] - margin <= x <= court_bounds['right'] + margin and
+                court_bounds['top'] - margin <= y <= court_bounds['bottom'] + margin)
     
 
 
