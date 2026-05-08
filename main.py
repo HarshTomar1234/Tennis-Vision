@@ -1,325 +1,533 @@
-from utils import (read_video, 
-                   save_video,
-                   measure_distance_between_points,
-                   draw_player_stats,
-                   convert_pixel_distance_to_meters,
-                   ShotClassifier,
-                   draw_shot_classifications,
-                   UILayoutManager
-                   )
-import cv2
-import constants
+#!/usr/bin/env python3
+"""
+Tennis-Vision main pipeline.
+
+Usage:
+  python main.py                                 # uses config.yaml defaults
+  python main.py --input input_videos/clip.mp4  # override input
+  python main.py --no-stubs                      # fresh detection run
+  python main.py --fast                          # single-frame keypoints, no ByteTrack
+  python main.py --debug                         # verbose log output
+"""
+import argparse
+import json
+import logging
 import os
-from trackers import PlayerTracker, BallTracker
+import sys
+from copy import deepcopy
+from datetime import datetime
+from pathlib import Path
+
+import cv2
+import pandas as pd
+import yaml
+
+import constants
 from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
-import pandas as pd
-from copy import deepcopy
+from trackers import BallTracker, PlayerTracker
+from utils import (
+    ShotClassifier,
+    UILayoutManager,
+    convert_pixel_distance_to_meters,
+    draw_player_stats,
+    draw_shot_classifications,
+    measure_distance_between_points,
+    read_video,
+    save_video,
+)
 
-# Feature toggle flags
-ENABLE_SHOT_CLASSIFICATION = True  # Set to False to disable shot classification
-ENABLE_PER_FRAME_KEYPOINTS = True  # Set to True for camera-robust detection (slower but more accurate)
-USE_BYTETRACK = True  # Set to True for smooth ball trajectory with Kalman filter
+
+# ── Config & CLI ───────────────────────────────────────────────────────────────
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Tennis-Vision: AI-powered tennis match analysis")
+    p.add_argument("--input",    "-i", help="Path to input video (overrides config)")
+    p.add_argument("--output",   "-o", help="Path to output video (overrides config)")
+    p.add_argument("--config",   "-c", default="configs/config.yaml", help="Config YAML path")
+    p.add_argument("--no-stubs", action="store_true", help="Disable cached stubs, force fresh detection")
+    p.add_argument("--fast",     action="store_true", help="Fast mode: first-frame keypoints, no ByteTrack")
+    p.add_argument("--debug",    action="store_true", help="Enable DEBUG log level")
+    return p.parse_args()
+
+
+_DEFAULTS: dict = {
+    "pipeline": {
+        "per_frame_keypoints": True,
+        "use_bytetrack": True,
+        "shot_classification": True,
+        "use_homography": True,
+    },
+    "models": {
+        "player": "yolov8x",
+        "ball": "models/last.pt",
+        "court": "models/keypoints_model.pth",
+    },
+    "io": {
+        "input_video": "input_videos/input_video_2.mp4",
+        "output_video": "output/videos/output_video.avi",
+        "output_frames_dir": "output/frames",
+        "output_stats_dir": "output/stats",
+        "log_dir": "logs",
+        "player_stub_path": "tracker_stubs/player_detections.pkl",
+        "ball_stub_bytetrack_path": "tracker_stubs/ball_detections_tracked.pkl",
+        "ball_stub_path": "tracker_stubs/ball_detections.pkl",
+    },
+    "stubs": {
+        "use_player_stubs": True,
+        "use_ball_stubs": False,
+    },
+    "detection": {
+        "player_confidence": 0.7,
+        "ball_confidence": 0.6,
+    },
+    "shot_classifier": {
+        "volley_distance_threshold": 40,
+        "smash_height_threshold": 0.7,
+        "net_y_position_relative": 0.5,
+    },
+    "logging": {
+        "level": "INFO",
+        "write_to_file": True,
+    },
+}
+
+
+def load_config(config_path: str) -> dict:
+    """Load YAML config and deep-merge over built-in defaults."""
+    cfg = deepcopy(_DEFAULTS)
+    if config_path and os.path.exists(config_path):
+        with open(config_path, encoding="utf-8") as f:
+            user = yaml.safe_load(f) or {}
+        for section, values in user.items():
+            if section in cfg and isinstance(values, dict):
+                cfg[section].update(values)
+            else:
+                cfg[section] = values
+    return cfg
+
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+
+def setup_logging(cfg: dict) -> logging.Logger:
+    log_cfg = cfg.get("logging", {})
+    level = getattr(logging, log_cfg.get("level", "INFO").upper(), logging.INFO)
+
+    fmt = "%(asctime)s  %(levelname)-8s  %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
+    if log_cfg.get("write_to_file", True):
+        log_dir = Path(cfg["io"].get("log_dir", "logs"))
+        log_dir.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        handlers.append(logging.FileHandler(log_dir / f"run_{stamp}.log", encoding="utf-8"))
+
+    logging.basicConfig(level=level, format=fmt, datefmt="%H:%M:%S",
+                        handlers=handlers, force=True)
+    return logging.getLogger("tennis_vision")
+
+
+# ── Stats output ───────────────────────────────────────────────────────────────
+
+def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger):
+    """Write full stats CSV + match-summary JSON to output_dir."""
+    out = Path(output_dir)
+    out.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    csv_path = out / f"stats_{stamp}.csv"
+    stats_df.to_csv(csv_path, index=False)
+    logger.info(f"Stats CSV  → {csv_path}")
+
+    last = stats_df.iloc[-1]
+
+    def _safe(col: str, default=0.0):
+        return round(float(last.get(col, default)), 1)
+
+    summary = {
+        "generated_at": stamp,
+        "total_shots_p1": int(last.get("player_1_number_of_shots", 0)),
+        "total_shots_p2": int(last.get("player_2_number_of_shots", 0)),
+        "avg_shot_speed_p1_kmh": _safe("player_1_average_shot_speed"),
+        "avg_shot_speed_p2_kmh": _safe("player_2_average_shot_speed"),
+        "avg_player_speed_p1_kmh": _safe("player_1_average_player_speed"),
+        "avg_player_speed_p2_kmh": _safe("player_2_average_player_speed"),
+    }
+    json_path = out / f"summary_{stamp}.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    logger.info(f"Summary JSON → {json_path}")
+
+
+# ── Pipeline ───────────────────────────────────────────────────────────────────
 
 def main():
-    try:
-        # Reading video frames
-        input_video_path = "input_videos/input_video_2.mp4"
-        video_frames = read_video(input_video_path)
-        print(f"Loaded {len(video_frames)} frames from {input_video_path}")
+    args = parse_args()
+    cfg = load_config(args.config)
 
-        # Detecting players and ball
-        player_tracker = PlayerTracker(model_path="yolov8x")
-        ball_tracker = BallTracker(model_path="models/last.pt")
+    # CLI flags override config values
+    if args.input:
+        cfg["io"]["input_video"] = args.input
+    if args.output:
+        cfg["io"]["output_video"] = args.output
+    if args.no_stubs:
+        cfg["stubs"]["use_player_stubs"] = False
+        cfg["stubs"]["use_ball_stubs"] = False
+    if args.debug:
+        cfg["logging"]["level"] = "DEBUG"
+    if args.fast:
+        cfg["pipeline"]["per_frame_keypoints"] = False
+        cfg["pipeline"]["use_bytetrack"] = False
 
-        print("Detecting players...")
-        player_detections = player_tracker.detect_frames(video_frames, read_from_stub=True, stub_path="tracker_stubs/player_detections.pkl")
-        
-        print("Detecting ball...")
-        if USE_BYTETRACK:
-            print("[BYTETRACK MODE] Using Kalman filter for smooth ball trajectory...")
+    logger = setup_logging(cfg)
+
+    logger.info("=" * 60)
+    logger.info("Tennis-Vision pipeline starting")
+    logger.info(f"Input   : {cfg['io']['input_video']}")
+    logger.info(f"Output  : {cfg['io']['output_video']}")
+    logger.info(f"Config  : {args.config}")
+    logger.info(f"Mode    : {'camera-robust' if cfg['pipeline']['per_frame_keypoints'] else 'fast'}")
+    logger.info(f"Homogr. : {'on' if cfg['pipeline']['use_homography'] else 'off (approx)'}")
+    logger.info("=" * 60)
+
+    # ── 1. Load video ──────────────────────────────────────────────
+    logger.info("[1/9] Loading video frames...")
+    input_path = cfg["io"]["input_video"]
+    video_frames = read_video(input_path)
+
+    cap = cv2.VideoCapture(input_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    if not fps or fps <= 0:
+        logger.warning("Could not read FPS from video header, defaulting to 30")
+        fps = 30.0
+
+    logger.info(f"  {len(video_frames)} frames | {fps:.1f} fps | "
+                f"{video_frames[0].shape[1]}×{video_frames[0].shape[0]}px")
+
+    # ── 2. Player detection ────────────────────────────────────────
+    logger.info("[2/9] Player detection...")
+    player_tracker = PlayerTracker(model_path=cfg["models"]["player"])
+    use_player_stubs = cfg["stubs"]["use_player_stubs"]
+    player_detections = player_tracker.detect_frames(
+        video_frames,
+        read_from_stub=use_player_stubs,
+        stub_path=cfg["io"]["player_stub_path"],
+    )
+    source = f"stub ({cfg['io']['player_stub_path']})" if use_player_stubs else "fresh YOLO"
+    logger.info(f"  Source: {source}")
+
+    # ── 3. Ball detection ──────────────────────────────────────────
+    logger.info("[3/9] Ball detection...")
+    use_tracknet = cfg["pipeline"].get("use_tracknet", False)
+
+    if use_tracknet:
+        import pickle
+        from trackers.tracknet_ball_tracker import TrackNetBallTracker
+        ball_tracker = TrackNetBallTracker(
+            model_path=cfg["models"].get("tracknet", "models/tracknet.pt")
+        )
+        tracknet_stub = cfg["io"].get("tracknet_stub_path", "tracker_stubs/ball_detections_tracknet.pkl")
+        use_ball_stubs = cfg["stubs"].get("use_ball_stubs", False)
+
+        if use_ball_stubs and Path(tracknet_stub).exists():
+            logger.info(f"  TrackNet v2 — loading from stub ({tracknet_stub})")
+            with open(tracknet_stub, "rb") as f:
+                ball_detections = pickle.load(f)
+        else:
+            logger.info("  TrackNet v2 (temporal heatmap, 3-frame context)")
+            ball_detections = ball_tracker.detect_frames(video_frames)
+            Path(tracknet_stub).parent.mkdir(exist_ok=True)
+            with open(tracknet_stub, "wb") as f:
+                pickle.dump(ball_detections, f)
+            logger.info(f"  Saved TrackNet detections → {tracknet_stub}")
+    else:
+        ball_tracker = BallTracker(model_path=cfg["models"]["ball"])
+        use_ball_stubs = cfg["stubs"]["use_ball_stubs"]
+
+        if cfg["pipeline"]["use_bytetrack"]:
+            logger.info("  ByteTrack mode (Kalman filter + temporal smoothing)")
             ball_detections = ball_tracker.detect_frames_with_tracking(
-                video_frames, 
-                read_from_stub=False,  # Must be False to use tracking
-                stub_path="tracker_stubs/ball_detections_tracked.pkl"
+                video_frames,
+                read_from_stub=use_ball_stubs,
+                stub_path=cfg["io"]["ball_stub_bytetrack_path"],
             )
         else:
+            logger.info("  Standard YOLO mode")
             ball_detections = ball_tracker.detect_frames(
-                video_frames, 
-                read_from_stub=True, 
-                stub_path="tracker_stubs/ball_detections.pkl"
+                video_frames,
+                read_from_stub=use_ball_stubs,
+                stub_path=cfg["io"]["ball_stub_path"],
             )
 
-        print("Interpolating ball positions...")
-        ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
+    raw_detected = sum(1 for d in ball_detections if d.get(1))
+    total = len(video_frames)
+    logger.info(f"  Raw detections: {raw_detected}/{total} frames "
+                f"({100 * raw_detected / total:.1f}%)")
 
-        # Court Line Detection
-        print("Detecting court lines...")
-        court_model_path = "models/keypoints_model.pth"
-        court_line_detector = CourtLineDetector(court_model_path)
-        
-        # CAMERA-ROBUST: Detect keypoints per-frame or just first frame
-        if ENABLE_PER_FRAME_KEYPOINTS:
-            print("[CAMERA-ROBUST MODE] Detecting keypoints for ALL frames...")
-            print("Note: This takes longer but handles camera motion correctly.")
-            all_court_keypoints = court_line_detector.predict_all_frames(
-                video_frames, smooth=True, window_size=5
+    logger.info("  Interpolating missing positions...")
+    ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
+
+    # ── 4. Court line detection ────────────────────────────────────
+    logger.info("[4/9] Court keypoint detection...")
+    court_detector = CourtLineDetector(cfg["models"]["court"])
+
+    if cfg["pipeline"]["per_frame_keypoints"]:
+        logger.info("  Per-frame mode (camera-robust, slower)...")
+        all_court_keypoints = court_detector.predict_all_frames(
+            video_frames, smooth=True, window_size=5
+        )
+        court_keypoints = all_court_keypoints[0]
+    else:
+        logger.info("  Single-frame mode (fast)...")
+        court_keypoints = court_detector.predict(video_frames[0])
+        all_court_keypoints = [court_keypoints] * len(video_frames)
+
+    logger.info(f"  {len(all_court_keypoints)} keypoint sets ready")
+
+    # ── 5. Player selection ────────────────────────────────────────
+    logger.info("[5/9] Filtering to 2 main players...")
+    player_detections = player_tracker.choose_and_filter_players(
+        player_detections, court_keypoints
+    )
+
+    first_frame_ids = sorted(player_detections[0].keys())
+    player_id_map = {orig: new for new, orig in enumerate(first_frame_ids[:2], start=1)}
+    logger.info(f"  Player ID mapping: {player_id_map}")
+
+    normalized: list[dict] = []
+    for frame in player_detections:
+        normalized.append(
+            {player_id_map[k]: v for k, v in frame.items() if k in player_id_map}
+        )
+    player_detections = normalized
+
+    # ── 6. Mini-court setup ────────────────────────────────────────
+    logger.info("[6/9] Building mini-court visualization...")
+    layout_manager = UILayoutManager(video_frames[0].shape, court_keypoints)
+    mini_court = MiniCourt(
+        video_frames[0],
+        layout_params=layout_manager.get_mini_court_params(),
+    )
+    stats_params = layout_manager.get_stats_panel_params()
+    logger.info(f"  Mini-court position: start=({mini_court.start_x}, {mini_court.start_y}) "
+                f"size={mini_court.mini_court_width}×{mini_court.mini_court_height}px")
+
+    # ── 7. Shot frames + coordinate mapping ───────────────────────
+    logger.info("[7/9] Detecting shot frames + mapping to mini-court...")
+    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+
+    # A ball bounce also causes a y-reversal, so filter to frames where
+    # a player is actually close to the ball (i.e., a player hit it).
+    # Bounces happen in the middle of the court with no player nearby.
+    shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
+    confirmed_shot_frames: list[int] = []
+    for sf in ball_shot_frames:
+        ball_bbox = ball_detections[sf].get(1)
+        if ball_bbox is None:
+            continue
+        bx = (ball_bbox[0] + ball_bbox[2]) / 2.0
+        by = (ball_bbox[1] + ball_bbox[3]) / 2.0
+        players_in_frame = player_detections[sf]
+        if not players_in_frame:
+            continue
+        closest_player_dist = min(
+            ((p[0] + p[2]) / 2.0 - bx) ** 2 + (p[3] - by) ** 2
+            for p in players_in_frame.values()
+        ) ** 0.5
+        if closest_player_dist <= shot_dist_px:
+            confirmed_shot_frames.append(sf)
+
+    logger.info(
+        f"  {len(ball_shot_frames)} y-reversals → {len(confirmed_shot_frames)} "
+        f"confirmed shots (player within {shot_dist_px}px)"
+    )
+    ball_shot_frames = confirmed_shot_frames
+
+    use_hom = cfg["pipeline"]["use_homography"]
+    logger.info(f"  Coordinate mapping: {'homography (perspective-correct)' if use_hom else 'nearest-keypoint (approximate)'}")
+
+    player_mini_court, ball_mini_court = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
+        player_detections, ball_detections, all_court_keypoints,
+        use_homography=use_hom,
+    )
+
+    # ── 8. Shot classification ─────────────────────────────────────
+    shot_classifications: dict = {}
+    if cfg["pipeline"]["shot_classification"]:
+        logger.info("[8/9] Classifying shots...")
+        sc_cfg = cfg.get("shot_classifier", {})
+        shot_classifier = ShotClassifier(
+            volley_threshold=sc_cfg.get("volley_distance_threshold", 40),
+            smash_height_threshold=sc_cfg.get("smash_height_threshold", 0.7),
+            net_y_relative=sc_cfg.get("net_y_position_relative", 0.5),
+        )
+        shot_classifications = shot_classifier.classify_shots(
+            player_mini_court, ball_mini_court, ball_shot_frames,
+            mini_court.court_drawing_height,
+        )
+        types = [v["shot_type"] for v in shot_classifications.values()]
+        logger.info(f"  {len(shot_classifications)} shots classified: {types}")
+    else:
+        logger.info("[8/9] Shot classification disabled")
+
+    # ── Build stats DataFrame ──────────────────────────────────────
+    logger.info("  Computing player statistics...")
+    det_cfg = cfg.get("detection", {})
+
+    player_stats_data: list[dict] = [{
+        "frame_num": 0,
+        "player_1_number_of_shots": 0, "player_1_total_shot_speed": 0,
+        "player_1_last_shot_speed": 0,  "player_1_total_player_speed": 0,
+        "player_1_last_player_speed": 0,
+        "player_2_number_of_shots": 0, "player_2_total_shot_speed": 0,
+        "player_2_last_shot_speed": 0,  "player_2_total_player_speed": 0,
+        "player_2_last_player_speed": 0,
+    }]
+
+    for idx in range(len(ball_shot_frames) - 1):
+        start_frame = ball_shot_frames[idx]
+        end_frame   = ball_shot_frames[idx + 1]
+        duration_s  = (end_frame - start_frame) / fps  # real FPS, not hardcoded 24
+
+        ball_start = ball_mini_court[start_frame].get(1)
+        ball_end   = ball_mini_court[end_frame].get(1)
+        if ball_start is None or ball_end is None or duration_s <= 0:
+            continue
+
+        ball_dist_px = measure_distance_between_points(ball_start, ball_end)
+        ball_dist_m  = convert_pixel_distance_to_meters(
+            ball_dist_px, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court()
+        )
+        ball_speed_kmh = ball_dist_m / duration_s * 3.6
+
+        player_pos = player_mini_court[start_frame]
+        if not player_pos:
+            continue
+        shooter_id = min(
+            player_pos.keys(),
+            key=lambda pid: measure_distance_between_points(player_pos[pid], ball_start),
+        )
+        opponent_id = 1 if shooter_id == 2 else 2
+
+        opp_start = player_mini_court[start_frame].get(opponent_id)
+        opp_end   = player_mini_court[end_frame].get(opponent_id)
+        opp_speed_kmh = 0.0
+        if opp_start and opp_end:
+            opp_dist_px = measure_distance_between_points(opp_start, opp_end)
+            opp_dist_m  = convert_pixel_distance_to_meters(
+                opp_dist_px, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court()
             )
-            # For backward compatibility, also keep first frame's keypoints
-            court_keypoints = all_court_keypoints[0]
+            opp_speed_kmh = opp_dist_m / duration_s * 3.6
+
+        row = deepcopy(player_stats_data[-1])
+        # Delay display by 3 frames so stats appear after visible racket contact,
+        # not at the y-reversal detection point which can be slightly early.
+        row["frame_num"] = start_frame + 3
+        row[f"player_{shooter_id}_number_of_shots"]   += 1
+        row[f"player_{shooter_id}_total_shot_speed"]  += ball_speed_kmh
+        row[f"player_{shooter_id}_last_shot_speed"]    = ball_speed_kmh
+        row[f"player_{opponent_id}_total_player_speed"] += opp_speed_kmh
+        row[f"player_{opponent_id}_last_player_speed"]  = opp_speed_kmh
+
+        if cfg["pipeline"]["shot_classification"] and start_frame in shot_classifications:
+            row[f"player_{shooter_id}_shot_type"] = shot_classifications[start_frame]["shot_type"]
+
+        player_stats_data.append(row)
+        shot_label = shot_classifications.get(start_frame, {}).get("shot_type", "?")
+        logger.debug(f"  Shot {idx + 1}: P{shooter_id} | {ball_speed_kmh:.1f} km/h | {shot_label}")
+
+    frames_df = pd.DataFrame({"frame_num": range(len(video_frames))})
+    stats_df  = pd.merge(frames_df, pd.DataFrame(player_stats_data),
+                         on="frame_num", how="left").ffill()
+
+    for pid in (1, 2):
+        n = stats_df[f"player_{pid}_number_of_shots"].replace(0, 1)
+        stats_df[f"player_{pid}_average_shot_speed"]   = stats_df[f"player_{pid}_total_shot_speed"] / n
+        stats_df[f"player_{pid}_average_player_speed"] = stats_df[f"player_{pid}_total_player_speed"] / n
+
+    logger.info(f"  P1: {int(stats_df['player_1_number_of_shots'].iloc[-1])} shots, "
+                f"avg {stats_df['player_1_average_shot_speed'].iloc[-1]:.1f} km/h")
+    logger.info(f"  P2: {int(stats_df['player_2_number_of_shots'].iloc[-1])} shots, "
+                f"avg {stats_df['player_2_average_shot_speed'].iloc[-1]:.1f} km/h")
+
+    save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger)
+
+    # ── 9. Render output video ─────────────────────────────────────
+    logger.info("[9/9] Rendering output video...")
+    output_frames = video_frames.copy()
+
+    logger.debug("  Filtering player detections by confidence...")
+    player_detections = player_tracker.filter_by_confidence(
+        player_detections, det_cfg.get("player_confidence", 0.7)
+    )
+    logger.debug("  Filtering ball detections by confidence...")
+    ball_detections = ball_tracker.filter_by_confidence(
+        ball_detections, det_cfg.get("ball_confidence", 0.6)
+    )
+
+    logger.debug("  Drawing player bounding boxes...")
+    output_frames = player_tracker.draw_bboxes(output_frames, player_detections, thickness=2)
+
+    logger.debug("  Drawing ball bounding boxes...")
+    output_frames = ball_tracker.draw_bboxes(
+        output_frames, ball_detections, color=(0, 255, 255), thickness=2
+    )
+
+    logger.debug("  Drawing player stats panel...")
+    output_frames = draw_player_stats(output_frames, stats_df, stats_params)
+
+    logger.debug("  Drawing court keypoints...")
+    if cfg["pipeline"]["per_frame_keypoints"]:
+        output_frames = court_detector.draw_keypoints_on_video_dynamic(
+            output_frames, all_court_keypoints, point_color=(0, 140, 255), radius=5
+        )
+    else:
+        output_frames = court_detector.draw_keypoints_on_video(
+            output_frames, court_keypoints, point_color=(0, 140, 255), radius=5
+        )
+
+    logger.debug("  Drawing mini court + player/ball positions...")
+    output_frames = mini_court.draw_mini_court(output_frames)
+    output_frames = mini_court.draw_ball_trajectory(output_frames, ball_mini_court)
+    output_frames = mini_court.draw_points_on_mini_court(
+        output_frames, player_mini_court, color=(0, 255, 0), draw_trail=True, label=None
+    )
+    output_frames = mini_court.draw_points_on_mini_court(
+        output_frames, ball_mini_court, color=(0, 255, 255), label=None
+    )
+
+    logger.debug("  Adding per-frame overlays...")
+    for i, frame in enumerate(output_frames):
+        cv2.putText(frame, f"Frame: {i}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        if i in {sf + 3 for sf in ball_shot_frames}:
+            cv2.putText(frame, "BALL SHOT!", (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+    if cfg["pipeline"]["shot_classification"]:
+        logger.debug("  Adding shot classification overlays...")
+        output_frames = draw_shot_classifications(
+            output_frames, shot_classifications, ball_shot_frames
+        )
+
+    # Save output
+    output_path = cfg["io"]["output_video"]
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    if save_video(output_frames, output_path):
+        logger.info(f"Output video → {output_path}")
+    else:
+        alt = output_path.replace(".avi", "_fallback.mp4")
+        logger.warning(f"AVI save failed — retrying as {alt}...")
+        if save_video(output_frames, alt):
+            logger.info(f"Output video → {alt}")
         else:
-            print("[FAST MODE] Detecting keypoints for first frame only...")
-            court_keypoints = court_line_detector.predict(video_frames[0])
-            # Create list with same keypoints for all frames (old behavior)
-            all_court_keypoints = [court_keypoints] * len(video_frames)
+            logger.error("All video save attempts failed")
 
-        # Choose players
-        print("Filtering players...")
-        player_detections = player_tracker.choose_and_filter_players(player_detections, court_keypoints)
-
-        # Normalize player IDs to 1 and 2
-        # Use a list to ensure consistent ordering if needed, or simple iteration
-        first_frame_players = player_detections[0].keys()
-        # Sort to ensure consistent mapping across runs if needed, or just map as they appear
-        player_ids = sorted(list(first_frame_players)) 
-        
-        # We expect exactly 2 players after filtering, but let's handle cases safely
-        player_id_map = {}
-        for i, original_id in enumerate(player_ids):
-             # Map first ID to 1, second to 2. If more, ignore or map sequentially.
-             if i < 2:
-                player_id_map[original_id] = i + 1
-        
-        print(f"Mapping player IDs: {player_id_map}")
-
-        # Update player_detections with new IDs
-        normalized_player_detections = []
-        for frame_detections in player_detections:
-            normalized_frame = {}
-            for original_id, bbox in frame_detections.items():
-                if original_id in player_id_map:
-                    new_id = player_id_map[original_id]
-                    normalized_frame[new_id] = bbox
-            normalized_player_detections.append(normalized_frame)
-        
-        player_detections = normalized_player_detections
-
-        # CAMERA-ROBUST: Setup UI layout manager for dynamic positioning
-        print("Setting up dynamic UI layout...")
-        layout_manager = UILayoutManager(video_frames[0].shape, court_keypoints)
-        mini_court_params = layout_manager.get_mini_court_params()
-        stats_params = layout_manager.get_stats_panel_params()
-        
-        # MiniCourt with dynamic positioning
-        print("Setting up mini court visualization...")
-        mini_court = MiniCourt(video_frames[0], layout_params=mini_court_params) 
-
-        # Detect ball shots
-        print("Detecting ball shots...")
-        ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
-        print(f"Detected ball shots at frames: {ball_shot_frames}")
-
-        # Convert positions to mini court positions
-        # CAMERA-ROBUST: Now uses per-frame keypoints for accurate mapping
-        print("Converting to mini court coordinates...")
-        player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
-            player_detections, ball_detections, all_court_keypoints)
-
-        # NEW: Shot Classification (if enabled)
-        shot_classifications = {}
-        if ENABLE_SHOT_CLASSIFICATION:
-            print("Classifying shots...")
-            shot_classifier = ShotClassifier()
-            shot_classifications = shot_classifier.classify_shots(
-                player_mini_court_detections, 
-                ball_mini_court_detections, 
-                ball_shot_frames,
-                mini_court.court_height
-            )
-            print(f"Classified {len(shot_classifications)} shots")
-
-        player_stats_data  = [{
-            "frame_num": 0,
-            "player_1_number_of_shots": 0,
-            "player_1_total_shot_speed": 0,
-            "player_1_last_shot_speed": 0,
-            "player_1_total_player_speed": 0,
-            "player_1_last_player_speed": 0,
-
-            "player_2_number_of_shots": 0,
-            "player_2_total_shot_speed": 0,
-            "player_2_last_shot_speed": 0,
-            "player_2_total_player_speed": 0,
-            "player_2_last_player_speed": 0,
-        }]   
-
-        for ball_shot_ind in range(len(ball_shot_frames)-1):
-            start_frame = ball_shot_frames[ball_shot_ind]
-            end_frame = ball_shot_frames[ball_shot_ind + 1]
-            ball_shot_time_in_seconds = (end_frame - start_frame)/ 24 # 24 fps
-
-            # Get distance covered by the ball
-            distance_covered_by_ball_pixels = measure_distance_between_points(ball_mini_court_detections[start_frame][1], ball_mini_court_detections[end_frame][1])
-
-            distance_covered_by_ball_meters = convert_pixel_distance_to_meters(distance_covered_by_ball_pixels, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court())
-
-            # Speed of the ball shot in km/h
-            speed_of_ball_shot = distance_covered_by_ball_meters / ball_shot_time_in_seconds * 3.6
-
-            # player who made the shot
-            player_positions = player_mini_court_detections[start_frame]
-            player_shot_ball = min(player_positions.keys(), key=lambda x: measure_distance_between_points(player_positions[x], ball_mini_court_detections[start_frame][1]))
-
-            # Opponent player speed
-            opponent_player_id = 1 if player_shot_ball == 2 else 2
-            speed_of_opponent_player = 0
-
-            if opponent_player_id in player_mini_court_detections[start_frame] and opponent_player_id in player_mini_court_detections[end_frame]: 
-                distance_covered_by_opponent_player_pixels = measure_distance_between_points(
-                                                                                                player_mini_court_detections[start_frame][opponent_player_id],
-                                                                                                player_mini_court_detections[end_frame][opponent_player_id]
-                                                                                            )
-
-                distance_covered_by_opponent_player_meters = convert_pixel_distance_to_meters(
-                    distance_covered_by_opponent_player_pixels,
-                    constants.DOUBLE_LINE_WIDTH,
-                    mini_court.get_width_of_mini_court()
-                )
-                # Speed of the opponent player
-                speed_of_opponent_player = distance_covered_by_opponent_player_meters / ball_shot_time_in_seconds * 3.6  
-
-            current_player_stats = deepcopy(player_stats_data[-1])
-            current_player_stats["frame_num"] = start_frame
-            current_player_stats[f"player_{player_shot_ball}_number_of_shots"] += 1
-            current_player_stats[f"player_{player_shot_ball}_total_shot_speed"] += speed_of_ball_shot
-            current_player_stats[f"player_{player_shot_ball}_last_shot_speed"] = speed_of_ball_shot   
-
-            current_player_stats[f"player_{opponent_player_id}_total_player_speed"] += speed_of_opponent_player
-            current_player_stats[f"player_{opponent_player_id}_last_player_speed"] = speed_of_opponent_player
-
-            # NEW: Add shot type to player stats if enabled
-            if ENABLE_SHOT_CLASSIFICATION and start_frame in shot_classifications:
-                shot_type = shot_classifications[start_frame]['shot_type']
-                current_player_stats[f"player_{player_shot_ball}_shot_type"] = shot_type
-
-            player_stats_data.append(current_player_stats)
-
-        player_stats_data_df = pd.DataFrame(player_stats_data)
-        frames_df = pd.DataFrame({"frame_num": range(len(video_frames))})
-
-        player_state_data_df = pd.merge(frames_df, player_stats_data_df, on="frame_num", how="left")
-        player_state_data_df = player_state_data_df.ffill()
-
-        # Fixed column names and division logic
-        player_state_data_df["player_1_average_shot_speed"] = player_state_data_df["player_1_total_shot_speed"] / player_state_data_df["player_1_number_of_shots"].replace(0, 1)
-        player_state_data_df["player_2_average_shot_speed"] = player_state_data_df["player_2_total_shot_speed"] / player_state_data_df["player_2_number_of_shots"].replace(0, 1)
-
-        player_state_data_df["player_1_average_player_speed"] = player_state_data_df["player_1_total_player_speed"] / player_state_data_df["player_1_number_of_shots"].replace(0, 1)
-        player_state_data_df["player_2_average_player_speed"] = player_state_data_df["player_2_total_player_speed"] / player_state_data_df["player_2_number_of_shots"].replace(0, 1)
-
-        
-        # Create initial output frames
-        print("Creating output video...")
-        output_video_frames = video_frames.copy()
-
-        # ENHANCEMENT: Implement additional validation and confidence threshold for more accurate detections
-        # Higher confidence thresholds for both player and ball detections to reduce false positives
-        player_confidence_threshold = 0.7  # Only consider high-confidence player detections
-        ball_confidence_threshold = 0.6    # Slightly lower for ball as it's smaller and harder to detect
-        
-        # ENHANCEMENT: Apply additional filtering to player detections based on court position and size
-        print("Enhancing player detection accuracy...")
-        player_detections = player_tracker.filter_by_confidence(player_detections, player_confidence_threshold)
-        
-        # ENHANCEMENT: Apply additional filtering to ball detections
-        print("Enhancing ball detection accuracy...")
-        ball_detections = ball_tracker.filter_by_confidence(ball_detections, ball_confidence_threshold)
-        
-        # Draw Player Bounding Boxes - with darker, more prominent outlines
-        print("Drawing player bounding boxes...")
-        output_video_frames = player_tracker.draw_bboxes(output_video_frames, player_detections, thickness=2)
-        
-        # Draw Ball Bounding Boxes - with enhanced visibility
-        print("Drawing ball bounding boxes...")
-        output_video_frames = ball_tracker.draw_bboxes(output_video_frames, ball_detections, color=(0, 255, 255), thickness=2)
-
-        # Draw Player Stats with dynamic positioning
-        print("Drawing player stats...")
-        output_video_frames = draw_player_stats(output_video_frames, player_state_data_df, stats_params)
-
-        # Draw Court Keypoints - CAMERA-ROBUST: Uses per-frame keypoints
-        print("Drawing court keypoints...")
-        if ENABLE_PER_FRAME_KEYPOINTS:
-            output_video_frames = court_line_detector.draw_keypoints_on_video_dynamic(
-                output_video_frames, all_court_keypoints, point_color=(0, 140, 255), radius=5)
-        else:
-            output_video_frames = court_line_detector.draw_keypoints_on_video(
-                output_video_frames, court_keypoints, point_color=(0, 140, 255), radius=5)
-
-        # ENHANCEMENT: Draw Mini Court with improved visual styling without labels
-        print("Drawing mini court with enhanced styling...")
-        output_video_frames = mini_court.draw_mini_court(output_video_frames)
-        
-        # ENHANCEMENT: Draw ball trajectory first as background layer with improved visual style
-        print("Visualizing ball trajectory with enhanced visualization...")
-        output_video_frames = mini_court.draw_ball_trajectory(output_video_frames, ball_mini_court_detections)
-        
-        # ENHANCEMENT: Draw players with improved visibility - darker, more prominent circles
-        # Note: removed labels per user request
-        print("Drawing player positions with enhanced visualization...")
-        output_video_frames = mini_court.draw_points_on_mini_court(
-            output_video_frames, player_mini_court_detections, color=(0, 255, 0), draw_trail=True, label=None)
-        
-        # ENHANCEMENT: Draw current ball position with improved visibility
-        # Note: removed labels per user request
-        print("Drawing ball positions with enhanced visualization...")
-        output_video_frames = mini_court.draw_points_on_mini_court(
-            output_video_frames, ball_mini_court_detections, color=(0, 255, 255), label=None)
-
-        # Draw frame number and additional info on top left corner
-        print("Adding frame information...")
-        for i, frame in enumerate(output_video_frames):
-            # Draw frame number
-            cv2.putText(frame, f"Frame: {i}",(10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            
-            # Indicate if this is a ball shot frame
-            if i in ball_shot_frames:
-                cv2.putText(frame, "BALL SHOT!",(10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-        # NEW: Add shot classification overlays if enabled
-        if ENABLE_SHOT_CLASSIFICATION:
-            print("Adding shot classification overlays...")
-            output_video_frames = draw_shot_classifications(output_video_frames, shot_classifications, ball_shot_frames)
-
-        # Save output video
-        print("Saving output video...")
-        output_video_path = "output_videos/output_video.avi"
-        
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
-        
-        # Save video with additional error handling
-        success = save_video(output_video_frames, output_video_path)
-        
-        if success:
-            print(f"Processing complete! Video saved to {output_video_path}")
-        else:
-            print(f"ERROR: Failed to save video to {output_video_path}")
-            
-            # Try alternative format as fallback
-            print("Attempting to save as MP4 instead...")
-            output_video_path_mp4 = "output_videos/output_video_2.mp4"
-            success_mp4 = save_video(output_video_frames, output_video_path_mp4)
-            
-            if success_mp4:
-                print(f"Successfully saved video as MP4 to {output_video_path_mp4}")
-            else:
-                print("CRITICAL ERROR: All video saving attempts failed.")
-        
-    except Exception as e:
-        print(f"Error occurred: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    logger.info("=" * 60)
+    logger.info("Pipeline complete.")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
