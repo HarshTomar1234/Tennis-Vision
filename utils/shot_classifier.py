@@ -9,8 +9,7 @@ class ShotClassifier:
     Based on player position, ball trajectory, and timing.
     """
     
-    def __init__(self):
-        # Define shot types
+    def __init__(self, volley_threshold=40, smash_height_threshold=0.7, net_y_relative=0.5):
         self.SHOT_TYPES = {
             'SERVE': 'Serve',
             'FOREHAND': 'Forehand',
@@ -18,7 +17,7 @@ class ShotClassifier:
             'VOLLEY': 'Volley',
             'SMASH': 'Smash'
         }
-        
+
         # Shot colors for visualization (BGR format)
         self.SHOT_COLORS = {
             self.SHOT_TYPES['SERVE']: (0, 165, 255),     # Orange
@@ -27,11 +26,10 @@ class ShotClassifier:
             self.SHOT_TYPES['VOLLEY']: (255, 255, 0),    # Cyan
             self.SHOT_TYPES['SMASH']: (0, 0, 255)        # Red
         }
-        
-        # Shot classification thresholds
-        self.VOLLEY_DISTANCE_THRESHOLD = 150  # Distance from net for volley detection
-        self.SMASH_HEIGHT_THRESHOLD = 0.7     # Relative height threshold for smash detection
-        self.NET_Y_POSITION_RELATIVE = 0.5    # Relative position of the net (middle of court)
+
+        self.VOLLEY_DISTANCE_THRESHOLD = volley_threshold        # px from net (default 40)
+        self.SMASH_HEIGHT_THRESHOLD = smash_height_threshold
+        self.NET_Y_POSITION_RELATIVE = net_y_relative
         
     def classify_shots(self, player_mini_court_detections, ball_mini_court_detections, 
                       ball_shot_frames, mini_court_height):
@@ -145,43 +143,41 @@ class ShotClassifier:
                 return self.SHOT_TYPES['FOREHAND']
                 
     def get_shot_color(self, shot_type):
-        """Get the color associated with a shot type for visualization"""
-        return self.SHOT_COLORS.get(shot_type, (255, 255, 255))  # Default to white
+        """Get color for a shot type. Case-insensitive lookup."""
+        color = self.SHOT_COLORS.get(shot_type)
+        if color is None:
+            color = self.SHOT_COLORS.get(shot_type.title())
+        return color or (255, 255, 255)
 
 
-def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
+def draw_shot_classifications(frames, shot_classifications, ball_shot_frames,
+                              display_delay: int = 3, banner_duration: int = 15):
     """
     Draw shot classification information in a dedicated shot statistics board.
-    
-    Args:
-        frames: List of video frames to draw on
-        shot_classifications: Dictionary of shot classifications by frame
-        ball_shot_frames: List of frame numbers where shots occur
-        
-    Returns:
-        Frames with shot statistics board
+
+    display_delay: frames after the y-reversal before the SHOT ANALYSIS panel updates.
+                   Avoids showing the label before the racket contacts the ball.
+    banner_duration: how many frames the top-center shot announcement banner stays
+                     on screen (default 15 ≈ 0.5 s at 30 fps).
     """
     import cv2
-    
-    # Initialize shot classifier for color mapping
+
     shot_classifier = ShotClassifier()
-    
-    # Font settings
+
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.6
     thickness = 1
-    
-    # Process each frame
+
     for i, frame in enumerate(frames):
         height, width = frame.shape[:2]
-        
-        # Create player shot histories up to the current frame
+
+        # Build shot history for each player up to this frame,
+        # applying display_delay so the type appears after actual contact.
         player_shots = {1: [], 2: []}
         max_shots_to_display = 3
-        
-        # Only include shots that have happened up to this frame
+
         for frame_num, shot_info in shot_classifications.items():
-            if frame_num <= i:  # Only include shots up to the current frame
+            if frame_num + display_delay <= i:
                 player_id = shot_info['player_id']
                 shot_type = shot_info['shot_type']
                 
@@ -283,11 +279,11 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
                    font, 0.65, (255, 255, 255), thickness)
         
         # Add each shot type with its color
-        shot_types = [("SM", "Smash", shot_classifier.get_shot_color("smash")),
-                     ("BH", "Backhand", shot_classifier.get_shot_color("backhand")), 
-                     ("FH", "Forehand", shot_classifier.get_shot_color("forehand")),
-                     ("SE", "Serve", shot_classifier.get_shot_color("serve")),
-                     ("VO", "Volley", shot_classifier.get_shot_color("volley")),]
+        shot_types = [("SM", "Smash",    shot_classifier.get_shot_color("Smash")),
+                      ("BH", "Backhand", shot_classifier.get_shot_color("Backhand")),
+                      ("FH", "Forehand", shot_classifier.get_shot_color("Forehand")),
+                      ("SE", "Serve",    shot_classifier.get_shot_color("Serve")),
+                      ("VO", "Volley",   shot_classifier.get_shot_color("Volley"))]
         
         for idx, (abbr, name, color) in enumerate(shot_types):
             y_offset = legend_y + 55 + idx * 25
@@ -308,36 +304,36 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames):
             cv2.putText(frame, name, (legend_x + 40, y_offset), 
                        font, font_scale, (255, 255, 255), thickness)
         
-        # Show "SHOT!" indicator when a shot is detected
-        if i in ball_shot_frames:
-            # Get the shot info if available
-            if i in shot_classifications:
-                shot_info = shot_classifications[i]
-                player_id = shot_info['player_id']
-                shot_type = shot_info['shot_type']
-                
-                # Message and color
-                shot_message = f"Player {player_id}: {shot_type.upper()}"
-                shot_color = shot_classifier.get_shot_color(shot_type)
-                
-                # Draw attention-grabbing notification at the top of the screen
-                notification_width = 300
-                notification_x = (width - notification_width) // 2
-                notification_y = 20
-                
-                # Background with player color
-                cv2.rectangle(frame, 
-                             (notification_x, notification_y), 
-                             (notification_x + notification_width, notification_y + 40), 
-                             shot_color, -1)
-                cv2.rectangle(frame, 
-                             (notification_x, notification_y), 
-                             (notification_x + notification_width, notification_y + 40), 
-                             (255, 255, 255), 2)  # White border
-                
-                # Shot text
-                cv2.putText(frame, shot_message, 
-                           (notification_x + 20, notification_y + 28), 
-                           font, 0.8, (0, 0, 0), thickness+1)
+        # Show shot announcement banner for `banner_duration` frames after detection
+        # (delayed by display_delay so it coincides with visible racket contact)
+        active_banner = None
+        for sf in ball_shot_frames:
+            show_start = sf + display_delay
+            show_end   = sf + display_delay + banner_duration
+            if show_start <= i < show_end and sf in shot_classifications:
+                active_banner = shot_classifications[sf]
+                break
+
+        if active_banner is not None:
+            player_id = active_banner['player_id']
+            shot_type = active_banner['shot_type']
+            shot_message = f"Player {player_id}: {shot_type.upper()}"
+            shot_color = shot_classifier.get_shot_color(shot_type)
+
+            notification_width = 300
+            notification_x = (width - notification_width) // 2
+            notification_y = 20
+
+            cv2.rectangle(frame,
+                         (notification_x, notification_y),
+                         (notification_x + notification_width, notification_y + 40),
+                         shot_color, -1)
+            cv2.rectangle(frame,
+                         (notification_x, notification_y),
+                         (notification_x + notification_width, notification_y + 40),
+                         (255, 255, 255), 2)
+            cv2.putText(frame, shot_message,
+                       (notification_x + 20, notification_y + 28),
+                       font, 0.8, (0, 0, 0), thickness + 1)
     
     return frames 
