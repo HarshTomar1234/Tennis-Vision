@@ -10,6 +10,7 @@ env/
 *.pt
 models/*.pt
 models/*.pth
+models/*.task
 yolov8x.pt
 
 # Python cache
@@ -35,8 +36,7 @@ Thumbs.db
 
 # ── Local-only dev files (not for contributors) ──
 CLAUDE.md
-PLAN.md
-AUDIT.md
+docs/
 learning_notes/
 analysis/
 audit_frames/
@@ -60,3 +60,11 @@ external/
 
 # Debug/scratch files
 tracknet_eval_debug.txt
+
+# Personal prep / private notes (never commit)
+prep_james/
+image.png
+image copy.png
+image copy 2.png
+*.png.txt
+2026-*-research-*.txt
