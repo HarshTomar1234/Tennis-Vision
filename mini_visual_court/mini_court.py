@@ -353,6 +353,110 @@ class MiniCourt:
 
         return out_players, out_ball
 
+    # ── State-aware ball projection ───────────────────────────────────────────
+
+    def convert_ball_to_mini_court_coordinates(
+        self,
+        ball_boxes: list[dict],
+        court_keypoints,
+        floor_level_states: list[str],
+        use_homography: bool = True,
+    ) -> dict[int, dict]:
+        """
+        Map the ball to mini-court coordinates, respecting floor-level validity.
+
+        The floor homography is only geometrically correct when the ball is AT floor
+        level (a contact or a bounce — see utils.ball_state.classify_floor_level).
+        Projecting an airborne pixel through it gives a wrong position, because the
+        ball has real height that the floor-plane transform cannot see.
+
+        So: project directly at floor-level frames, and linearly interpolate the
+        mini-court position for in-flight frames between the surrounding floor-level
+        anchors. This draws the ball's true ground track instead of a geometrically
+        invalid airborne scatter (see docs/journal/0003 and João's feedback in
+        docs/reference/APPROACH.md — "only project ball for floor bounces or player
+        hits"). Frames before the first anchor or after the last hold at that anchor
+        (no extrapolation).
+
+        Args:
+            ball_boxes:         per-frame {1: [x1,y1,x2,y2]}.
+            court_keypoints:    flat keypoint array, or a per-frame list (camera-robust).
+            floor_level_states: per-frame labels from classify_floor_level()
+                                 (FLOOR_LEVEL or IN_FLIGHT), same length as ball_boxes.
+            use_homography:     attempt RANSAC homography at anchor frames when True.
+
+        Returns:
+            dict[frame_num, {1: (x, y)}] mini-court ball positions.
+        """
+        n = len(ball_boxes)
+        per_frame = (
+            isinstance(court_keypoints, list)
+            and len(court_keypoints) > 0
+            and hasattr(court_keypoints[0], "__len__")
+            and not isinstance(court_keypoints[0], (int, float))
+        )
+        _h_cache: dict[tuple, np.ndarray | None] = {}
+
+        # Pass 1 — project the ball at every floor-level anchor frame only.
+        anchors: dict[int, tuple[float, float]] = {}
+        for frame_num in range(n):
+            if floor_level_states[frame_num] != "floor_level":
+                continue
+            bbox = ball_boxes[frame_num].get(1) if frame_num < len(ball_boxes) else None
+            if bbox is None:
+                continue
+
+            kp = court_keypoints[min(frame_num, len(court_keypoints) - 1)] if per_frame else court_keypoints
+            bx, by = (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
+
+            H: np.ndarray | None = None
+            if use_homography:
+                key = tuple(kp)
+                if key not in _h_cache:
+                    _h_cache[key] = self.compute_homography(kp)
+                H = _h_cache[key]
+
+            try:
+                mx, my = self.apply_homography(H, (bx, by)) if H is not None \
+                    else self._fallback_mapping(bx, by, kp)
+                anchors[frame_num] = (
+                    float(np.clip(mx, self.start_x, self.end_x)),
+                    float(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
+                )
+            except (ValueError, TypeError, IndexError):
+                continue
+
+        # Pass 2 — interpolate every frame between the surrounding anchors.
+        anchor_frames = sorted(anchors)
+        out: dict[int, dict] = {}
+
+        if not anchor_frames:
+            logger.warning("convert_ball_to_mini_court_coordinates: no floor-level anchors found")
+            return {f: {} for f in range(n)}
+
+        for frame_num in range(n):
+            if frame_num in anchors:
+                out[frame_num] = {1: anchors[frame_num]}
+                continue
+
+            # Find the nearest anchor before and after this frame.
+            prev_f = next((a for a in reversed(anchor_frames) if a < frame_num), None)
+            next_f = next((a for a in anchor_frames if a > frame_num), None)
+
+            if prev_f is None and next_f is None:
+                out[frame_num] = {}
+            elif prev_f is None:
+                out[frame_num] = {1: anchors[next_f]}          # before first anchor — hold
+            elif next_f is None:
+                out[frame_num] = {1: anchors[prev_f]}           # after last anchor — hold
+            else:
+                t = (frame_num - prev_f) / (next_f - prev_f)    # linear interpolation
+                px, py = anchors[prev_f]
+                nx, ny = anchors[next_f]
+                out[frame_num] = {1: (px + t * (nx - px), py + t * (ny - py))}
+
+        return out
+
     # ── Rendering ─────────────────────────────────────────────────────────────
 
     def draw_mini_court(self, frames: list[np.ndarray]) -> list[np.ndarray]:
@@ -439,8 +543,42 @@ class MiniCourt:
 
     def draw_ball_trajectory(
         self,
-        frames:    list[np.ndarray],
-        positions: dict[int, dict],
+        frames:       list[np.ndarray],
+        positions:    dict[int, dict],
+        trail_length: int = 15,
     ) -> list[np.ndarray]:
-        """Trajectory trail rendering — not yet implemented."""
+        """
+        Draw a fading trail of the ball's recent mini-court positions.
+
+        For each frame, connects the ball's last `trail_length` positions with a
+        polyline that thins toward the oldest point (a simple, cheap fade — full
+        per-segment alpha blending isn't worth the extra draw calls for a small
+        mini-court panel) and applies one transparency pass so the trail doesn't
+        fully obscure the court beneath it.
+
+        Args:
+            frames:       output video frames (modified in place, also returned).
+            positions:    {frame_num: {1: (x, y)}} — e.g. from
+                          convert_ball_to_mini_court_coordinates.
+            trail_length: how many recent frames the trail covers.
+        """
+        for i, frame in enumerate(frames):
+            trail: list[tuple[int, int]] = []
+            for f in range(max(0, i - trail_length + 1), i + 1):
+                pos = positions.get(f, {}).get(1)
+                if pos is not None:
+                    trail.append((int(pos[0]), int(pos[1])))
+
+            if len(trail) < 2:
+                continue
+
+            overlay = frame.copy()
+            n = len(trail)
+            for j in range(1, n):
+                fade = j / n   # 0 (oldest) -> 1 (newest)
+                thickness = max(1, round(3 * fade))
+                cv2.line(overlay, trail[j - 1], trail[j], _BALL_FILL, thickness)
+
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
         return frames
