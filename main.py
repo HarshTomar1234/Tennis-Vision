@@ -27,14 +27,20 @@ from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
 from trackers import BallTracker, PlayerTracker
 from utils import (
+    PoseEstimator,
     ShotClassifier,
     UILayoutManager,
+    classify_contact_vs_bounce,
+    classify_floor_level,
+    classify_forehand_backhand,
     convert_pixel_distance_to_meters,
     draw_player_stats,
     draw_shot_classifications,
     measure_distance_between_points,
+    peak_speed_kmh_near_frame,
     read_video,
     save_video,
+    smooth_trajectories,
 )
 
 
@@ -315,42 +321,50 @@ def main():
 
     # ── 7. Shot frames + coordinate mapping ───────────────────────
     logger.info("[7/9] Detecting shot frames + mapping to mini-court...")
-    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+    raw_reversal_frames = ball_tracker.get_ball_shot_frames(ball_detections)
 
-    # A ball bounce also causes a y-reversal, so filter to frames where
-    # a player is actually close to the ball (i.e., a player hit it).
-    # Bounces happen in the middle of the court with no player nearby.
+    # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
+    # bounce) is a valid homography anchor — the floor transform is correct at floor
+    # level regardless of which caused it. In-flight frames interpolate between
+    # anchors instead of being projected (wrong — the ball has real height while
+    # airborne). See utils.ball_state and docs/journal/0003 for why contact-vs-bounce
+    # is NOT needed for this part.
+    floor_states = classify_floor_level(raw_reversal_frames, len(video_frames))
+
+    # Best-effort CONTACT vs BOUNCE split for shot counting / stats only — a
+    # player-proximity heuristic with a measured ~5/7 ceiling on the reference clip
+    # (position data alone cannot cleanly separate them; see journal 0003). Not
+    # ground truth — used for "who hit the ball and when", not for geometry validity.
     shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
-    confirmed_shot_frames: list[int] = []
-    for sf in ball_shot_frames:
-        ball_bbox = ball_detections[sf].get(1)
-        if ball_bbox is None:
-            continue
-        bx = (ball_bbox[0] + ball_bbox[2]) / 2.0
-        by = (ball_bbox[1] + ball_bbox[3]) / 2.0
-        players_in_frame = player_detections[sf]
-        if not players_in_frame:
-            continue
-        closest_player_dist = min(
-            ((p[0] + p[2]) / 2.0 - bx) ** 2 + (p[3] - by) ** 2
-            for p in players_in_frame.values()
-        ) ** 0.5
-        if closest_player_dist <= shot_dist_px:
-            confirmed_shot_frames.append(sf)
-
+    confirmed_shot_frames, bounce_frames = classify_contact_vs_bounce(
+        raw_reversal_frames, ball_detections, player_detections,
+        shot_player_distance_px=shot_dist_px,
+    )
     logger.info(
-        f"  {len(ball_shot_frames)} y-reversals → {len(confirmed_shot_frames)} "
-        f"confirmed shots (player within {shot_dist_px}px)"
+        f"  {len(raw_reversal_frames)} y-reversals → {len(floor_states) and sum(1 for s in floor_states if s == 'floor_level')} "
+        f"floor-level anchors | {len(confirmed_shot_frames)} confirmed shots + "
+        f"{len(bounce_frames)} bounces (best-effort, player within {shot_dist_px}px)"
     )
     ball_shot_frames = confirmed_shot_frames
 
     use_hom = cfg["pipeline"]["use_homography"]
-    logger.info(f"  Coordinate mapping: {'homography (perspective-correct)' if use_hom else 'nearest-keypoint (approximate)'}")
+    logger.info(f"  Coordinate mapping: {'homography (perspective-correct, floor-anchored)' if use_hom else 'nearest-keypoint (approximate)'}")
 
-    player_mini_court, ball_mini_court = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
+    player_mini_court, _unused_ball_mini_court = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
         player_detections, ball_detections, all_court_keypoints,
         use_homography=use_hom,
     )
+    ball_mini_court = mini_court.convert_ball_to_mini_court_coordinates(
+        ball_detections, all_court_keypoints, floor_states, use_homography=use_hom,
+    )
+
+    # Kalman smoothing (Phase 1, Step 3) — stabilizes the projected dots frame to
+    # frame (João's feedback) and gives continuous velocity for the shot-speed stat
+    # below, instead of depending on distance between two possibly-noisy shot-frame
+    # detections. See docs/journal/0004.
+    logger.info("  Smoothing positions with Kalman filter...")
+    player_mini_court, _player_velocities = smooth_trajectories(player_mini_court)
+    ball_mini_court, ball_velocities       = smooth_trajectories(ball_mini_court)
 
     # ── 8. Shot classification ─────────────────────────────────────
     shot_classifications: dict = {}
@@ -366,6 +380,46 @@ def main():
             player_mini_court, ball_mini_court, ball_shot_frames,
             mini_court.court_drawing_height,
         )
+        # Upgrade forehand/backhand from real body geometry where pose is available.
+        # Serve, Volley and Smash keep their existing rules — those are genuine physical
+        # signatures (overhead reach, net proximity). Forehand vs backhand was the one
+        # label with no real basis in position data, so that is the only one replaced.
+        # See utils/pose_shot_classifier.py and docs/journal/0006.
+        if cfg["pipeline"].get("use_pose_shots", False):
+            pose_estimator = PoseEstimator(
+                model_path=cfg["models"].get("pose", "models/pose_landmarker_lite.task")
+            )
+            if pose_estimator.available:
+                upgraded = 0
+                for shot_frame, info in shot_classifications.items():
+                    if info["shot_type"] not in ("Forehand", "Backhand"):
+                        continue   # don't second-guess Serve/Volley/Smash
+                    ball_bbox = ball_detections[shot_frame].get(1)
+                    player_bbox = player_detections[shot_frame].get(info["player_id"])
+                    if ball_bbox is None or player_bbox is None:
+                        continue
+                    ball_xy = ((ball_bbox[0] + ball_bbox[2]) / 2.0,
+                               (ball_bbox[1] + ball_bbox[3]) / 2.0)
+                    landmarks = pose_estimator.detect_in_bbox(
+                        video_frames[shot_frame], player_bbox
+                    )
+                    result = classify_forehand_backhand(
+                        landmarks, ball_xy,
+                        max_contact_distance=2.0 * (player_bbox[2] - player_bbox[0]),
+                    )
+                    if result is not None:
+                        info["shot_type"] = result[0]
+                        info["pose_confidence"] = round(result[1], 2)
+                        upgraded += 1
+                pose_estimator.close()
+                logger.info(
+                    f"  Pose-based forehand/backhand: {upgraded} of "
+                    f"{len(shot_classifications)} shots upgraded "
+                    f"(rest kept position-based — pose unavailable or ambiguous)"
+                )
+            else:
+                logger.info("  Pose model unavailable — keeping position-based labels")
+
         types = [v["shot_type"] for v in shot_classifications.values()]
         logger.info(f"  {len(shot_classifications)} shots classified: {types}")
     else:
@@ -385,21 +439,26 @@ def main():
         "player_2_last_player_speed": 0,
     }]
 
+    px_to_m_scale = constants.DOUBLE_LINE_WIDTH / mini_court.get_width_of_mini_court()
+
     for idx in range(len(ball_shot_frames) - 1):
         start_frame = ball_shot_frames[idx]
         end_frame   = ball_shot_frames[idx + 1]
         duration_s  = (end_frame - start_frame) / fps  # real FPS, not hardcoded 24
-
-        ball_start = ball_mini_court[start_frame].get(1)
-        ball_end   = ball_mini_court[end_frame].get(1)
-        if ball_start is None or ball_end is None or duration_s <= 0:
+        if duration_s <= 0:
             continue
 
-        ball_dist_px = measure_distance_between_points(ball_start, ball_end)
-        ball_dist_m  = convert_pixel_distance_to_meters(
-            ball_dist_px, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court()
+        ball_start = ball_mini_court[start_frame].get(1)
+        if ball_start is None:
+            continue
+
+        # Ball shot speed = peak Kalman velocity near the contact frame — matches how
+        # real speed guns measure it (at/near contact), not averaged over the whole
+        # flight between two shot-frame detections. See docs/journal/0004.
+        ball_speed_kmh = peak_speed_kmh_near_frame(
+            ball_velocities, frame=start_frame, entity_id=1, window=5,
+            px_to_m_scale=px_to_m_scale, fps=fps,
         )
-        ball_speed_kmh = ball_dist_m / duration_s * 3.6
 
         player_pos = player_mini_court[start_frame]
         if not player_pos:
