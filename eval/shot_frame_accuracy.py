@@ -23,7 +23,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import csv
-from trackers import BallTracker
+from _ball_source import pipeline_ball_detections
 from utils import read_video
 
 # Hand-labeled ground truth for input_video_2.mp4
@@ -75,13 +75,10 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
     print(f"Ground truth  : {gt_frames}")
     print(f"{'=' * 55}")
 
-    frames   = read_video(video_path)
-    tracker  = BallTracker(model_path="models/last.pt")
-    ball_det = tracker.detect_frames_with_tracking(
-        frames, read_from_stub=False, stub_path=None
-    )
-    ball_det = tracker.interpolate_ball_positions(ball_det)
-    detected = tracker.get_ball_shot_frames(ball_det)
+    frames          = read_video(video_path)
+    tracker, ball_det = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
+    ball_det        = tracker.interpolate_ball_positions(ball_det)
+    detected        = tracker.get_ball_shot_frames(ball_det)
 
     print(f"GT shots    : {len(gt_frames)}")
     print(f"Detected    : {len(detected)} at frames {detected}")
