@@ -9,12 +9,15 @@ pipeline:
   shot_classification: true    # Enable shot type classification
   use_homography: true         # Real perspective homography (vs. nearest-keypoint approx)
   use_tracknet: true          # true = TrackNet v2 ball detector; false = YOLO (set true after weights downloaded)
+  use_pose_shots: true         # pose-based forehand/backhand (falls back to position rules when pose is unavailable)
 
 models:
   player: "yolov8x"
   ball: "models/last.pt"
   court: "models/keypoints_model.pth"
   tracknet: "models/tracknet.pt"    # download: gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
+  # download: curl -L -o models/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+  pose: "models/pose_landmarker_lite.task"
 
 io:
   input_video: "input_videos/input_video_2.mp4"
