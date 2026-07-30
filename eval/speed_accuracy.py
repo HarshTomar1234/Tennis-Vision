@@ -22,12 +22,15 @@ import pandas as pd
 from copy import deepcopy
 
 import constants
-from trackers import PlayerTracker, BallTracker
+from _ball_source import pipeline_ball_detections
+from trackers import PlayerTracker
 from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
 from utils import (
     read_video, measure_distance_between_points,
     convert_pixel_distance_to_meters, UILayoutManager,
+    classify_floor_level, classify_contact_vs_bounce,
+    smooth_trajectories, peak_speed_kmh_near_frame,
 )
 
 # Realistic range constants (km/h)
@@ -48,19 +51,18 @@ def evaluate(video_path: str) -> dict:
     cap.release()
     print(f"Loaded {len(frames)} frames @ {fps:.1f} fps")
 
-    # Run full detection pipeline (using stubs where available)
+    # Run detection the way the pipeline does: TrackNet ball (from stub) + player stub.
     print("Running detection pipeline (may take a moment)...")
     player_tracker = PlayerTracker(model_path="yolov8x")
-    ball_tracker   = BallTracker(model_path="models/last.pt")
 
     player_dets = player_tracker.detect_frames(
         frames, read_from_stub=True, stub_path="tracker_stubs/player_detections.pkl"
     )
-    ball_dets = ball_tracker.detect_frames_with_tracking(
-        frames, read_from_stub=False, stub_path="tracker_stubs/ball_detections_tracked.pkl"
-    )
+    ball_tracker, ball_dets = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
     ball_dets = ball_tracker.interpolate_ball_positions(ball_dets)
 
+    # ponytail: single-frame keypoints — fine for the near-static input_video_2 baseline;
+    # switch to court_detector.predict_all_frames(...) when validating a moving-camera clip.
     court_detector  = CourtLineDetector("models/keypoints_model.pth")
     court_keypoints = court_detector.predict(frames[0])
     all_kp          = [court_keypoints] * len(frames)
@@ -73,16 +75,49 @@ def evaluate(video_path: str) -> dict:
     layout   = UILayoutManager(frames[0].shape, court_keypoints)
     mini_crt = MiniCourt(frames[0], layout_params=layout.get_mini_court_params())
 
-    player_mini, ball_mini = mini_crt.convert_bounding_boxes_to_mini_court_coordinates(
+    player_mini, _unused_ball_mini = mini_crt.convert_bounding_boxes_to_mini_court_coordinates(
         player_dets, ball_dets, all_kp, use_homography=True
     )
 
-    shot_frames = ball_tracker.get_ball_shot_frames(ball_dets)
+    # Floor-level-anchored ball projection (Phase 1): only trust the homography at
+    # trajectory reversals (contact/bounce), interpolate in between. See
+    # utils.ball_state and docs/journal/0003 for why this replaces raw per-frame
+    # projection, which is geometrically wrong while the ball is airborne.
+    raw_reversals = ball_tracker.get_ball_shot_frames(ball_dets)
+    floor_states  = classify_floor_level(raw_reversals, len(frames))
+    ball_mini     = mini_crt.convert_ball_to_mini_court_coordinates(
+        ball_dets, all_kp, floor_states, use_homography=True
+    )
+
+    # Real shots only (not bounces) for the shot-to-shot speed loop — best-effort
+    # proximity split, ~5/7 measured ceiling on this clip (see journal 0003).
+    shot_frames, bounce_frames = classify_contact_vs_bounce(raw_reversals, ball_dets, player_dets)
+    print(f"Raw reversals : {len(raw_reversals)}  ->  {len(shot_frames)} shots + {len(bounce_frames)} bounces")
     print(f"Shot frames: {shot_frames}")
+
+    # Kalman-smoothed ball trajectory (Phase 1, Step 3): gives continuous velocity
+    # instead of depending on distance-between-two-shot-events, which was the actual
+    # cause of the earlier FAIL (event detection ceiling ~5/7, not ball geometry —
+    # see docs/journal/0004). Ball "shot speed" = peak velocity in a small window
+    # around the contact frame, matching how real speed guns measure it (at/near
+    # contact, not averaged over the whole flight).
+    _ball_smoothed, ball_velocities = smooth_trajectories(ball_mini)
+    px_to_m_scale = constants.DOUBLE_LINE_WIDTH / mini_crt.get_width_of_mini_court()
 
     ball_speeds: list[float]   = []
     player_speeds: list[float] = []
 
+    for sf in shot_frames:
+        speed = peak_speed_kmh_near_frame(
+            ball_velocities, frame=sf, entity_id=1, window=5,
+            px_to_m_scale=px_to_m_scale, fps=fps,
+        )
+        if speed > 0:
+            ball_speeds.append(speed)
+
+    # Player movement speed stays distance/time between shots — it is already
+    # realistic (see baseline) and, unlike the ball, a player doesn't reverse velocity
+    # instantaneously, so the discrete-event window issue doesn't apply the same way.
     for i in range(len(shot_frames) - 1):
         sf, ef = shot_frames[i], shot_frames[i + 1]
         dur = (ef - sf) / fps
@@ -90,14 +125,6 @@ def evaluate(video_path: str) -> dict:
             continue
 
         b_start = ball_mini[sf].get(1)
-        b_end   = ball_mini[ef].get(1)
-        if b_start and b_end:
-            d_px = measure_distance_between_points(b_start, b_end)
-            d_m  = convert_pixel_distance_to_meters(
-                d_px, constants.DOUBLE_LINE_WIDTH, mini_crt.get_width_of_mini_court()
-            )
-            ball_speeds.append(d_m / dur * 3.6)
-
         p_pos = player_mini[sf]
         if p_pos:
             shooter = min(p_pos.keys(), key=lambda pid: measure_distance_between_points(
