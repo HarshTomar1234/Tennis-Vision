@@ -138,6 +138,71 @@ def classify_hit_or_bounce(
     return BOUNCE, 1.0 - p_hit
 
 
+def detect_xvelocity_candidates(
+    ball_detections: list[dict],
+    min_delta_x: float = 5.0,
+    min_spacing: int = 15,
+    window: int = EVENT_WINDOW,
+) -> list[int]:
+    """
+    Candidate contact/bounce frames from local peaks in |horizontal-velocity change|,
+    complementing (not replacing) trajectory-reversal detection.
+
+    Why this exists: journal 0014 found a structural gap in y-reversal-only detection —
+    some real contacts (verified on the reference clip) don't reverse vertical direction
+    at all, or reverse too shallowly to separate from noise at any threshold (swept
+    min_delta_y down to 1 with no improvement). But the same clip's real shots often DO
+    show a sharp change in horizontal velocity (the physical signal behind
+    hit_bounce_classifier — journal 0012), even when the vertical trajectory barely moves.
+
+    Tested standalone at dataset scale first (91 real clips): x-velocity alone actually
+    recalls WORSE than y-reversal (70.3% vs 76.0% at the best threshold) — it is not a
+    good replacement. But the UNION of both signals recalls 87.7%, a genuine +11.7 point
+    gain, because they catch different kinds of real events (vertical-redirect shots vs
+    horizontal-redirect shots). Use this alongside get_ball_shot_frames, not instead of
+    it — feed the union to classify_reversals_by_trajectory, which is what actually
+    filters the resulting extra candidates back down to real contacts/bounces.
+
+    Args:
+        ball_detections: per-frame {1: [x1,y1,x2,y2]} (same format as get_ball_shot_frames).
+        min_delta_x:     minimum |vx change| to count as a candidate peak.
+        min_spacing:     minimum frames between two candidates.
+        window:          frames of context on each side used to compute velocity.
+
+    Returns:
+        Candidate frame indices, sorted, at least min_spacing apart.
+    """
+    positions: list[tuple[float, float] | None] = []
+    for det in ball_detections:
+        bbox = det.get(1)
+        if bbox is not None:
+            positions.append(((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0))
+        else:
+            positions.append(None)
+
+    n = len(positions)
+    scores = [0.0] * n
+    for i in range(window, n - window):
+        before = [p for p in positions[i - window:i] if p is not None]
+        after  = [p for p in positions[i + 1:i + 1 + window] if p is not None]
+        if len(before) < 2 or len(after) < 2:
+            continue
+        vx_before = (before[-1][0] - before[0][0]) / (len(before) - 1)
+        vx_after  = (after[-1][0] - after[0][0]) / (len(after) - 1)
+        scores[i] = abs(vx_after - vx_before)
+
+    candidates: list[int] = []
+    for i in range(n):
+        if scores[i] < min_delta_x:
+            continue
+        lo, hi = max(0, i - min_spacing // 2), min(n, i + min_spacing // 2 + 1)
+        if scores[i] == max(scores[lo:hi]):
+            if not candidates or i - candidates[-1] >= min_spacing:
+                candidates.append(i)
+
+    return candidates
+
+
 def classify_reversals_by_trajectory(
     reversal_frames: list[int],
     ball_detections: list[dict],
