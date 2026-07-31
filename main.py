@@ -35,6 +35,7 @@ from utils import (
     classify_forehand_backhand,
     classify_reversals_by_trajectory,
     convert_pixel_distance_to_meters,
+    detect_xvelocity_candidates,
     draw_player_stats,
     draw_shot_classifications,
     measure_distance_between_points,
@@ -322,7 +323,14 @@ def main():
 
     # ── 7. Shot frames + coordinate mapping ───────────────────────
     logger.info("[7/9] Detecting shot frames + mapping to mini-court...")
-    raw_reversal_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+    # Union of two candidate signals: y-reversal (vertical trajectory flip) and
+    # x-velocity-change (horizontal redirect) — neither alone catches every real
+    # contact/bounce. Verified at dataset scale (91 clips) after full classification:
+    # recall 75.8%→87.6%, precision 88.9%→90.3% vs y-reversal alone. See
+    # docs/journal/0015 and utils.hit_bounce_classifier.detect_xvelocity_candidates.
+    yrev_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+    xvel_frames = detect_xvelocity_candidates(ball_detections)
+    raw_reversal_frames = sorted(set(yrev_frames) | set(xvel_frames))
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
     # bounce) is a valid homography anchor — the floor transform is correct at floor
