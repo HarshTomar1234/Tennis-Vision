@@ -58,7 +58,7 @@ class PoseEstimator:
         self,
         model_path: str = "models/pose_landmarker_lite.task",
         min_visibility: float = 0.5,
-        bbox_padding: float = 0.15,
+        bbox_padding: float = 0.45,
     ):
         """
         Args:
@@ -67,8 +67,15 @@ class PoseEstimator:
                             rather than trusted — a low-visibility wrist is a guess, and
                             a guessed wrist produces a guessed shot label.
             bbox_padding:   fraction of bbox size to expand the crop by. A tracked box is
-                            often tight around the torso and clips an extended hitting
-                            arm, which is exactly the landmark we care about most.
+                            tight around the torso and clips a fully extended hitting arm
+                            entirely — MediaPipe then fails to find a pose at all rather
+                            than returning a partial one. Measured on a real contact frame
+                            where the player was stretched wide for the ball: 0.15 (the
+                            old default) found nothing; 0.45 recovered a full pose without
+                            regressing any frame that already worked at 0.15; 0.60 pulled
+                            in enough background/other-player noise to break one of those.
+                            0.45 is the measured sweet spot, not a round-number guess —
+                            see docs/journal/0013 for the sweep.
         """
         self.model_path     = model_path
         self.min_visibility = min_visibility
