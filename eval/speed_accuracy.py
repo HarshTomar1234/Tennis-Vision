@@ -30,6 +30,7 @@ from utils import (
     read_video, measure_distance_between_points,
     convert_pixel_distance_to_meters, UILayoutManager,
     classify_floor_level, classify_contact_vs_bounce,
+    classify_reversals_by_trajectory,
     smooth_trajectories, peak_speed_kmh_near_frame,
 )
 
@@ -89,11 +90,17 @@ def evaluate(video_path: str) -> dict:
         ball_dets, all_kp, floor_states, use_homography=True
     )
 
-    # Real shots only (not bounces) for the shot-to-shot speed loop — best-effort
-    # proximity split, ~5/7 measured ceiling on this clip (see journal 0003).
-    shot_frames, bounce_frames = classify_contact_vs_bounce(raw_reversals, ball_dets, player_dets)
-    print(f"Raw reversals : {len(raw_reversals)}  ->  {len(shot_frames)} shots + {len(bounce_frames)} bounces")
-    print(f"Shot frames: {shot_frames}")
+    # Real shots only (not bounces) for the shot-to-shot speed loop.
+    # Two independent classifiers, compared: player-proximity (needs player detections,
+    # ~5/7 measured ceiling on this clip — journal 0003) vs trajectory-shape (needs only
+    # ball positions, 84.1% held-out accuracy on 1,034 real TrackNet-dataset events —
+    # journal 0012). Trajectory is used for the actual speed calc below since it's
+    # validated at far larger scale; proximity result printed alongside for comparison.
+    shot_frames_prox, bounce_frames_prox = classify_contact_vs_bounce(raw_reversals, ball_dets, player_dets)
+    shot_frames, bounce_frames = classify_reversals_by_trajectory(raw_reversals, ball_dets)
+    print(f"Raw reversals : {len(raw_reversals)}")
+    print(f"  proximity   -> {len(shot_frames_prox)} shots + {len(bounce_frames_prox)} bounces  {shot_frames_prox}")
+    print(f"  trajectory  -> {len(shot_frames)} shots + {len(bounce_frames)} bounces  {shot_frames}")
 
     # Kalman-smoothed ball trajectory (Phase 1, Step 3): gives continuous velocity
     # instead of depending on distance-between-two-shot-events, which was the actual
