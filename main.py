@@ -33,6 +33,7 @@ from utils import (
     classify_contact_vs_bounce,
     classify_floor_level,
     classify_forehand_backhand,
+    classify_reversals_by_trajectory,
     convert_pixel_distance_to_meters,
     draw_player_stats,
     draw_shot_classifications,
@@ -331,19 +332,43 @@ def main():
     # is NOT needed for this part.
     floor_states = classify_floor_level(raw_reversal_frames, len(video_frames))
 
-    # Best-effort CONTACT vs BOUNCE split for shot counting / stats only — a
-    # player-proximity heuristic with a measured ~5/7 ceiling on the reference clip
-    # (position data alone cannot cleanly separate them; see journal 0003). Not
-    # ground truth — used for "who hit the ball and when", not for geometry validity.
+    # CONTACT vs BOUNCE split for shot counting / stats only — geometry above doesn't
+    # need this (every reversal is a valid floor anchor either way).
+    #
+    # Primary: trajectory-shape classifier (utils.hit_bounce_classifier), trained on
+    # 1,034 real events from the original TrackNet dataset — 84.1% held-out accuracy,
+    # and on this project's own reference clip it recovered the exact real shot count
+    # (7) where the player-proximity heuristic below topped out around 19-20. See
+    # docs/journal/0012.
+    #
+    # Fallback: player-proximity heuristic (~5/7 ceiling on our clip — journal 0003),
+    # used only for reversals the trajectory classifier can't reach a decision on (not
+    # enough trajectory context, e.g. near a clip boundary) — better than silently
+    # dropping them.
     shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
-    confirmed_shot_frames, bounce_frames = classify_contact_vs_bounce(
-        raw_reversal_frames, ball_detections, player_detections,
-        shot_player_distance_px=shot_dist_px,
+    traj_contacts, traj_bounces = classify_reversals_by_trajectory(
+        raw_reversal_frames, ball_detections
     )
+    traj_classified = set(traj_contacts) | set(traj_bounces)
+    unclassified = [f for f in raw_reversal_frames if f not in traj_classified]
+
+    if unclassified:
+        prox_contacts, prox_bounces = classify_contact_vs_bounce(
+            unclassified, ball_detections, player_detections,
+            shot_player_distance_px=shot_dist_px,
+        )
+    else:
+        prox_contacts, prox_bounces = [], []
+
+    confirmed_shot_frames = sorted(traj_contacts + prox_contacts)
+    bounce_frames = sorted(traj_bounces + prox_bounces)
+
     logger.info(
         f"  {len(raw_reversal_frames)} y-reversals → {len(floor_states) and sum(1 for s in floor_states if s == 'floor_level')} "
         f"floor-level anchors | {len(confirmed_shot_frames)} confirmed shots + "
-        f"{len(bounce_frames)} bounces (best-effort, player within {shot_dist_px}px)"
+        f"{len(bounce_frames)} bounces "
+        f"({len(traj_contacts) + len(traj_bounces)} via trajectory model, "
+        f"{len(prox_contacts) + len(prox_bounces)} via proximity fallback)"
     )
     ball_shot_frames = confirmed_shot_frames
 
