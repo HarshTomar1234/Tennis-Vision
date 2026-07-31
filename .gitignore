@@ -55,6 +55,10 @@ tracker_stubs/
 # Third-party repos cloned under external/
 external/
 
+# External/pulled datasets (large, not project source — see docs/specs/phase_3)
+# datasets/labels/ (our own hand labels, small CSVs) is intentionally NOT ignored.
+datasets/external/
+
 # Claude Code local session data
 .claude/
 
