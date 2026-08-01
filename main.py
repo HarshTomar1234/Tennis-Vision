@@ -444,6 +444,19 @@ def main():
                         info["shot_type"] = result[0]
                         info["pose_confidence"] = round(result[1], 2)
                         upgraded += 1
+                        logger.debug(f"  Frame {shot_frame}: pose OK -> {result[0]} ({result[1]:.2f})")
+                    else:
+                        has_shoulders = bool(landmarks) and "LEFT_SHOULDER" in landmarks and "RIGHT_SHOULDER" in landmarks
+                        has_wrist = bool(landmarks) and ("LEFT_WRIST" in landmarks or "RIGHT_WRIST" in landmarks)
+                        if not landmarks:
+                            why = "no pose detected in crop"
+                        elif not has_shoulders:
+                            why = "shoulders missing"
+                        elif not has_wrist:
+                            why = "wrists missing"
+                        else:
+                            why = "ambiguous hand or too far from ball"
+                        logger.debug(f"  Frame {shot_frame}: pose FAILED ({why}) -- kept '{info['shot_type']}'")
                 pose_estimator.close()
                 logger.info(
                     f"  Pose-based forehand/backhand: {upgraded} of "
