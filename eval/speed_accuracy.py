@@ -117,9 +117,12 @@ def evaluate(video_path: str) -> dict:
     player_speeds: list[float] = []
 
     for sf in shot_frames:
+        # matches main.py: reject physically unrealistic peaks (tracking noise, not a
+        # real shot) instead of reporting them -- see docs/journal/0015.
         speed = peak_speed_kmh_near_frame(
             ball_velocities, frame=sf, entity_id=1, window=5,
             px_to_m_scale=px_to_m_scale, fps=fps,
+            max_realistic_kmh=constants.MAX_REALISTIC_BALL_SPEED_KMH,
         )
         if speed > 0:
             ball_speeds.append(speed)
