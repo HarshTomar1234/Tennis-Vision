@@ -18,9 +18,5 @@ lapx>=0.5.2
 # above and is stricter about matrix shapes than 4.x — see utils/kalman_smoother.py.
 mediapipe>=1.0.0
 
-# Visualization
-matplotlib>=3.5.0
-seaborn>=0.11.0
-
 # Testing
 pytest>=7.0.0
