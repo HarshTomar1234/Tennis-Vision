@@ -122,6 +122,7 @@ def peak_speed_kmh_near_frame(
     window: int,
     px_to_m_scale: float,
     fps: float,
+    max_realistic_kmh: float | None = None,
 ) -> float:
     """
     Peak ball/player speed (km/h) in a small window around `frame`.
@@ -131,6 +132,15 @@ def peak_speed_kmh_near_frame(
     better represented by the peak speed in a small surrounding window (it was
     approaching at that speed just before contact).
 
+    Taking a bare max over the window is vulnerable to a single noisy raw detection
+    (tracker jitter, not real motion) producing a physically impossible reading -- found
+    on our own clip: one candidate frame sat in a jittery stretch of raw TrackNet
+    detections and reported 371.7 km/h for a groundstroke. This isn't specific to that
+    clip or to the candidate that triggered it: raw per-frame detection noise near an
+    event frame can happen on any input, so `max_realistic_kmh` lets a caller reject the
+    result rather than pass tracking noise off as a measurement (see docs/journal/0015,
+    same "drop don't guess" convention as classify_reversals_by_trajectory).
+
     Args:
         velocities:    output of smooth_trajectories (px/frame, mini-court space);
                        dict keyed by frame number, or a plain list.
@@ -139,9 +149,12 @@ def peak_speed_kmh_near_frame(
         window:        frames to check on each side of `frame`.
         px_to_m_scale: metres per mini-court pixel (DOUBLE_LINE_WIDTH / court_drawing_width).
         fps:           video frame rate.
+        max_realistic_kmh: if given, treat a peak above this as tracking noise, not a
+                       measurement (returns 0.0, same sentinel as "no data").
 
     Returns:
-        Peak speed in km/h over the window (0.0 if no data in range).
+        Peak speed in km/h over the window (0.0 if no data in range, or if the peak
+        exceeds max_realistic_kmh).
     """
     if isinstance(velocities, list):
         velocities = dict(enumerate(velocities))
@@ -153,4 +166,8 @@ def peak_speed_kmh_near_frame(
         peak_px_per_frame = max(peak_px_per_frame, speed)
 
     m_per_frame = peak_px_per_frame * px_to_m_scale
-    return m_per_frame * fps * 3.6
+    kmh = m_per_frame * fps * 3.6
+
+    if max_realistic_kmh is not None and kmh > max_realistic_kmh:
+        return 0.0
+    return kmh
