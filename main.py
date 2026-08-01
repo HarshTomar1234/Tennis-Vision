@@ -491,6 +491,7 @@ def main():
         ball_speed_kmh = peak_speed_kmh_near_frame(
             ball_velocities, frame=start_frame, entity_id=1, window=5,
             px_to_m_scale=px_to_m_scale, fps=fps,
+            max_realistic_kmh=constants.MAX_REALISTIC_BALL_SPEED_KMH,
         )
 
         player_pos = player_mini_court[start_frame]
@@ -517,8 +518,13 @@ def main():
         # not at the y-reversal detection point which can be slightly early.
         row["frame_num"] = start_frame + 3
         row[f"player_{shooter_id}_number_of_shots"]   += 1
-        row[f"player_{shooter_id}_total_shot_speed"]  += ball_speed_kmh
-        row[f"player_{shooter_id}_last_shot_speed"]    = ball_speed_kmh
+        if ball_speed_kmh > 0:
+            # 0.0 means "no valid speed" (no data, or filtered as physically
+            # unrealistic -- see peak_speed_kmh_near_frame). Skip it rather than
+            # let a bad reading corrupt the running average; last_shot_speed keeps
+            # its previous value instead of showing a fabricated number.
+            row[f"player_{shooter_id}_total_shot_speed"]  += ball_speed_kmh
+            row[f"player_{shooter_id}_last_shot_speed"]    = ball_speed_kmh
         row[f"player_{opponent_id}_total_player_speed"] += opp_speed_kmh
         row[f"player_{opponent_id}_last_player_speed"]  = opp_speed_kmh
 
