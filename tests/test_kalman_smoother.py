@@ -93,3 +93,22 @@ def test_peak_speed_returns_zero_when_no_data():
     speed = peak_speed_kmh_near_frame([{}], frame=0, entity_id=1, window=1,
                                        px_to_m_scale=0.01, fps=30)
     assert speed == 0.0
+
+
+def test_peak_speed_rejects_implausible_reading():
+    # same setup as the local-max test, but scaled up to a physically impossible speed
+    velocities = [{1: (0.0, 0.0)}, {1: (500.0, 0.0)}, {1: (5.0, 0.0)}]
+    speed = peak_speed_kmh_near_frame(
+        velocities, frame=1, entity_id=1, window=1,
+        px_to_m_scale=0.01, fps=30, max_realistic_kmh=260.0,
+    )
+    assert speed == 0.0
+
+
+def test_peak_speed_keeps_plausible_reading_with_gate_set():
+    velocities = [{1: (0.0, 0.0)}, {1: (10.0, 0.0)}, {1: (5.0, 0.0)}]
+    speed = peak_speed_kmh_near_frame(
+        velocities, frame=1, entity_id=1, window=1,
+        px_to_m_scale=0.01, fps=30, max_realistic_kmh=260.0,
+    )
+    assert speed > 0
