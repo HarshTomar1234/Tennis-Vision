@@ -10,6 +10,7 @@ pipeline:
   use_homography: true         # Real perspective homography (vs. nearest-keypoint approx)
   use_tracknet: true          # true = TrackNet v2 ball detector; false = YOLO (set true after weights downloaded)
   use_pose_shots: true         # pose-based forehand/backhand (falls back to position rules when pose is unavailable)
+  use_vitpose_fallback: true   # ViTPose 2-D fallback when MediaPipe finds no wrists at all (motion blur) -- see docs/journal/0021
 
 models:
   player: "yolov8x"
