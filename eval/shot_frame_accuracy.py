@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import csv
 from _ball_source import pipeline_ball_detections
-from utils import read_video, detect_xvelocity_candidates
+from utils import read_video, detect_xvelocity_candidates, merge_nearby_candidates
 
 # Hand-labeled ground truth for input_video_2.mp4
 # Captured during audit session 2026-05-06 from audit_frames/ analysis
@@ -78,8 +78,10 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
     frames          = read_video(video_path)
     tracker, ball_det = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
     ball_det        = tracker.interpolate_ball_positions(ball_det)
-    # matches main.py: union of y-reversal + x-velocity candidates (docs/journal/0015)
-    detected        = sorted(set(tracker.get_ball_shot_frames(ball_det)) | set(detect_xvelocity_candidates(ball_det)))
+    # matches main.py: union of y-reversal + x-velocity candidates, merged (docs/journal/0018)
+    detected        = merge_nearby_candidates(
+        sorted(set(tracker.get_ball_shot_frames(ball_det)) | set(detect_xvelocity_candidates(ball_det)))
+    )
 
     print(f"GT shots    : {len(gt_frames)}")
     print(f"Detected    : {len(detected)} at frames {detected}")
