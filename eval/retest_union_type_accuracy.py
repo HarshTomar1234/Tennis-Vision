@@ -24,7 +24,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from trackers.tracknet_ball_tracker import TrackNetBallTracker
-from utils.hit_bounce_classifier import detect_xvelocity_candidates, classify_reversals_by_trajectory
+from utils.hit_bounce_classifier import (
+    detect_xvelocity_candidates,
+    classify_reversals_by_trajectory,
+    merge_nearby_candidates,
+)
 
 DATASET_ZIP = "datasets/external/tracknet_original/Dataset.zip"
 TOLERANCE = 10
@@ -54,7 +58,12 @@ def main():
     label_paths = sorted(n for n in zf.namelist() if n.endswith("Label.csv"))
     tracker = TrackNetBallTracker(model_path="models/tracknet.pt")
 
-    for label, use_union in [("y-reversal only (baseline)", False), ("union (y-reversal + x-velocity)", True)]:
+    configs = [
+        ("y-reversal only (baseline)", False, False),
+        ("union (y-reversal + x-velocity)", True, False),
+        ("union + merged nearby candidates", True, True),
+    ]
+    for label, use_union, use_merge in configs:
         n_contacts = n_contact_tp = 0
         n_bounces  = n_bounce_tp  = 0
         total_true_hits = total_hit_recalled = 0
@@ -70,6 +79,8 @@ def main():
                 raw_candidates = sorted(set(yrev) | set(xvel))
             else:
                 raw_candidates = yrev
+            if use_merge:
+                raw_candidates = merge_nearby_candidates(raw_candidates)
 
             contacts, bounces = classify_reversals_by_trajectory(raw_candidates, detections)
 
