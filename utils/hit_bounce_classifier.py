@@ -203,6 +203,49 @@ def detect_xvelocity_candidates(
     return candidates
 
 
+def merge_nearby_candidates(candidates: list[int], min_gap: int = 10) -> list[int]:
+    """
+    Collapse candidates within min_gap frames of each other into one representative
+    frame per cluster (the cluster's median).
+
+    get_ball_shot_frames (y-reversal) and detect_xvelocity_candidates each fire near a
+    real event independently, with no knowledge of each other, so their union can put
+    several candidates a few frames apart around the same single real contact. On our
+    own reference clip this inflated the apparent shot count from 7 (y-reversal only,
+    journal 0012) to 22 (union, journal 0015) -- most of the "extra" shots turned out to
+    be duplicate detections of the same handful of real events, not new false events
+    (see docs/journal/0018's frame-by-frame check). It also made downstream per-frame
+    work (pose classification) sensitive to *which* nearby frame got checked: contact
+    happens at one instant, so a candidate a few frames off has different wrist
+    positions than the true contact frame, and pose can succeed on one cluster member
+    while failing on another for the same swing.
+
+    min_gap=10 matches the tolerance used throughout this sprint's eval scripts for
+    "near the same event" (e.g. TOLERANCE in retest_union_type_accuracy.py).
+
+    Args:
+        candidates: raw candidate frames (e.g. the union of get_ball_shot_frames and
+                    detect_xvelocity_candidates), any order.
+        min_gap:    candidates within this many frames of their cluster's last member
+                    are merged into the same cluster.
+
+    Returns:
+        One representative frame per cluster, sorted.
+    """
+    if not candidates:
+        return []
+
+    ordered = sorted(candidates)
+    clusters: list[list[int]] = [[ordered[0]]]
+    for c in ordered[1:]:
+        if c - clusters[-1][-1] <= min_gap:
+            clusters[-1].append(c)
+        else:
+            clusters.append([c])
+
+    return [cluster[len(cluster) // 2] for cluster in clusters]
+
+
 def classify_reversals_by_trajectory(
     reversal_frames: list[int],
     ball_detections: list[dict],
