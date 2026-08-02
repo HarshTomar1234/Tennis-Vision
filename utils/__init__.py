@@ -23,5 +23,6 @@ from .hit_bounce_classifier import (
     classify_hit_or_bounce,
     classify_reversals_by_trajectory,
     detect_xvelocity_candidates,
+    merge_nearby_candidates,
 )
 from .ui_layout_manager import UILayoutManager, create_layout_for_frame
