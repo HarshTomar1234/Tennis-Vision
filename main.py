@@ -426,8 +426,18 @@ def main():
             pose_estimator = PoseEstimator(
                 model_path=cfg["models"].get("pose", "models/pose_landmarker_lite.task")
             )
+            use_vitpose_fallback = cfg["pipeline"].get("use_vitpose_fallback", False)
+            vitpose_estimator = None   # lazy -- only loaded if MediaPipe actually misses
+
+            def _has_shoulders_and_wrist(lm):
+                return (
+                    bool(lm) and "LEFT_SHOULDER" in lm and "RIGHT_SHOULDER" in lm
+                    and ("LEFT_WRIST" in lm or "RIGHT_WRIST" in lm)
+                )
+
             if pose_estimator.available:
                 upgraded = 0
+                fallback_used = 0
                 for shot_frame, info in shot_classifications.items():
                     if info["shot_type"] not in ("Forehand", "Backhand"):
                         continue   # don't second-guess Serve/Volley/Smash
@@ -440,6 +450,24 @@ def main():
                     landmarks = pose_estimator.detect_in_bbox(
                         video_frames[shot_frame], player_bbox
                     )
+                    source = "mediapipe"
+
+                    # ViTPose has no depth, so it can't safely replace MediaPipe's
+                    # side-on-collapse fix (see utils/pose_shot_classifier.py) -- only
+                    # tried when MediaPipe found nothing usable at all. See
+                    # docs/journal/0021.
+                    if use_vitpose_fallback and not _has_shoulders_and_wrist(landmarks):
+                        if vitpose_estimator is None:
+                            from utils.vitpose_estimator import ViTPoseEstimator
+                            vitpose_estimator = ViTPoseEstimator()
+                        if vitpose_estimator.available:
+                            vit_landmarks = vitpose_estimator.detect_in_bbox(
+                                video_frames[shot_frame], player_bbox
+                            )
+                            if vit_landmarks:
+                                landmarks = vit_landmarks
+                                source = "vitpose_fallback"
+
                     result = classify_forehand_backhand(
                         landmarks, ball_xy,
                         max_contact_distance=2.0 * (player_bbox[2] - player_bbox[0]),
@@ -448,7 +476,9 @@ def main():
                         info["shot_type"] = result[0]
                         info["pose_confidence"] = round(result[1], 2)
                         upgraded += 1
-                        logger.debug(f"  Frame {shot_frame}: pose OK -> {result[0]} ({result[1]:.2f})")
+                        if source == "vitpose_fallback":
+                            fallback_used += 1
+                        logger.debug(f"  Frame {shot_frame}: pose OK ({source}) -> {result[0]} ({result[1]:.2f})")
                     else:
                         has_shoulders = bool(landmarks) and "LEFT_SHOULDER" in landmarks and "RIGHT_SHOULDER" in landmarks
                         has_wrist = bool(landmarks) and ("LEFT_WRIST" in landmarks or "RIGHT_WRIST" in landmarks)
@@ -460,11 +490,12 @@ def main():
                             why = "wrists missing"
                         else:
                             why = "ambiguous hand or too far from ball"
-                        logger.debug(f"  Frame {shot_frame}: pose FAILED ({why}) -- kept '{info['shot_type']}'")
+                        logger.debug(f"  Frame {shot_frame}: pose FAILED ({source}, {why}) -- kept '{info['shot_type']}'")
                 pose_estimator.close()
                 logger.info(
                     f"  Pose-based forehand/backhand: {upgraded} of "
                     f"{len(shot_classifications)} shots upgraded "
+                    f"({fallback_used} via ViTPose fallback) "
                     f"(rest kept position-based — pose unavailable or ambiguous)"
                 )
             else:
