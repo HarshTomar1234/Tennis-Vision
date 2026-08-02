@@ -39,6 +39,7 @@ from utils import (
     draw_player_stats,
     draw_shot_classifications,
     measure_distance_between_points,
+    merge_nearby_candidates,
     peak_speed_kmh_near_frame,
     read_video,
     save_video,
@@ -330,7 +331,10 @@ def main():
     # docs/journal/0015 and utils.hit_bounce_classifier.detect_xvelocity_candidates.
     yrev_frames = ball_tracker.get_ball_shot_frames(ball_detections)
     xvel_frames = detect_xvelocity_candidates(ball_detections)
-    raw_reversal_frames = sorted(set(yrev_frames) | set(xvel_frames))
+    # The two generators can each fire within a few frames of the same real event with
+    # no knowledge of each other, inflating apparent shot count and making per-frame
+    # work (pose) sensitive to which nearby duplicate gets checked. See docs/journal/0018.
+    raw_reversal_frames = merge_nearby_candidates(sorted(set(yrev_frames) | set(xvel_frames)))
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
     # bounce) is a valid homography anchor — the floor transform is correct at floor
