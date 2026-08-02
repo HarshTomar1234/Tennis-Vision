@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.pose_shot_classifier import classify_forehand_backhand, FOREHAND, BACKHAND
+from utils.pose_shot_classifier import classify_forehand_backhand, FOREHAND, BACKHAND, MIN_2D_ONLY_AXIS_PX
 
 
 # ── Facing the camera ────────────────────────────────────────────────────────
@@ -167,6 +167,43 @@ def test_returns_none_on_fully_collapsed_shoulders():
         "RIGHT_WRIST":    (60.0, 120.0, 0.0),
     }
     assert classify_forehand_backhand(landmarks, ball_pos=(50.0, 120.0)) is None
+
+
+# ── 2-D-only fallback (no z -- e.g. a fallback pose model with no depth output) ──
+
+def test_2d_only_forehand_with_wide_shoulder_axis():
+    """No z on any landmark, but the shoulders are well separated in image x (not
+    side-on) -- the x-only axis is trustworthy here, same as the pre-depth-fix rule."""
+    landmarks = {
+        "RIGHT_SHOULDER": (100.0, 100.0),
+        "LEFT_SHOULDER":  (200.0, 100.0),
+        "RIGHT_WRIST":    (60.0, 120.0),
+    }
+    result = classify_forehand_backhand(landmarks, ball_pos=(50.0, 120.0))
+    assert result is not None
+    assert result[0] == FOREHAND
+
+
+def test_2d_only_refuses_when_shoulder_axis_collapses():
+    """No z, and the shoulders are only a few px apart in x -- exactly the side-on
+    collapse trap this module exists to avoid. Without depth to fall back on, must
+    refuse rather than guess."""
+    landmarks = {
+        "RIGHT_SHOULDER": (150.0, 100.0),
+        "LEFT_SHOULDER":  (150.0 + MIN_2D_ONLY_AXIS_PX / 2, 100.0),   # well under the floor
+        "RIGHT_WRIST":    (160.0, 120.0),
+    }
+    assert classify_forehand_backhand(landmarks, ball_pos=(165.0, 120.0)) is None
+
+
+def test_2d_only_axis_right_at_the_floor_still_works():
+    landmarks = {
+        "RIGHT_SHOULDER": (100.0, 100.0),
+        "LEFT_SHOULDER":  (100.0 + MIN_2D_ONLY_AXIS_PX + 1, 100.0),
+        "RIGHT_WRIST":    (60.0, 120.0),
+    }
+    result = classify_forehand_backhand(landmarks, ball_pos=(50.0, 120.0))
+    assert result is not None
 
 
 # ── Confidence behaviour ─────────────────────────────────────────────────────
