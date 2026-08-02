@@ -18,5 +18,10 @@ lapx>=0.5.2
 # above and is stricter about matrix shapes than 4.x — see utils/kalman_smoother.py.
 mediapipe>=1.0.0
 
+# ViTPose fallback for pose (2-D only, used when MediaPipe finds no wrists at all --
+# see utils/vitpose_estimator.py and docs/journal/0021). transformers>=5 required for
+# VitPoseForPoseEstimation.
+transformers>=5.0.0
+
 # Testing
 pytest>=7.0.0
