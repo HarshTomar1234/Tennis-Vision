@@ -34,7 +34,13 @@ from __future__ import annotations
 FOREHAND = "Forehand"
 BACKHAND = "Backhand"
 
-Landmark = tuple[float, float, float]   # (x_px, y_px, z_px)
+Landmark = tuple[float, float] | tuple[float, float, float]   # (x_px, y_px[, z_px])
+
+# Below this 2-D shoulder separation, a depth-free axis is exactly the collapse trap
+# this module exists to avoid (see module docstring, trap 3): real contacts measured
+# 2.8-8.5px here, ready stance measured 17-23px. Only used when depth isn't available
+# (e.g. a 2-D-only pose model used as a fallback) -- refuse rather than guess in that zone.
+MIN_2D_ONLY_AXIS_PX = 12.0
 
 
 def _image_dist(a: Landmark, b_xy: tuple[float, float]) -> float:
@@ -53,7 +59,13 @@ def classify_forehand_backhand(
 
     Args:
         landmarks: from PoseEstimator.detect_in_bbox — (x_px, y_px, z_px) per name.
-                   Needs both shoulders and at least one wrist.
+                   Needs both shoulders and at least one wrist. Landmarks without a z
+                   (e.g. from a 2-D-only pose model used as a fallback when the primary
+                   depth-aware estimator finds nothing) are also accepted, but the
+                   side-on collapse trap this module exists to avoid is real without
+                   depth -- see MIN_2D_ONLY_AXIS_PX. A 2-D-only answer on a genuinely
+                   side-on frame is refused rather than guessed, same "honest absence"
+                   convention as everywhere else in this function.
         ball_pos:  (x, y) ball centre in image space, used to pick the hitting hand.
         ambiguity_ratio: if both wrists are within this fraction of the body-axis length
                    of each other in ball-distance, the hitting hand is genuinely unclear
@@ -91,11 +103,19 @@ def classify_forehand_backhand(
 
     # Body axis in the HORIZONTAL (x, z) plane: from the player's right shoulder to
     # their left. Using z alongside x keeps this well-conditioned when the player turns
-    # side-on, which is exactly when a hit happens.
-    axis = (left_sh[0] - right_sh[0], left_sh[2] - right_sh[2])
+    # side-on, which is exactly when a hit happens. Falls back to x-only (z=0) when the
+    # landmark source has no depth -- see MIN_2D_ONLY_AXIS_PX for the safety net that
+    # keeps this path honest.
+    has_depth = len(left_sh) > 2 and len(right_sh) > 2
+    left_z  = left_sh[2]  if len(left_sh)  > 2 else 0.0
+    right_z = right_sh[2] if len(right_sh) > 2 else 0.0
+
+    axis = (left_sh[0] - right_sh[0], left_z - right_z)
     axis_len = (axis[0] ** 2 + axis[1] ** 2) ** 0.5
     if axis_len < 1e-6:
         return None   # landmarks collapsed entirely — no usable body axis
+    if not has_depth and axis_len < MIN_2D_ONLY_AXIS_PX:
+        return None   # side-on and no depth to disambiguate -- refuse, don't guess
 
     # The hitting hand is the wrist nearest the ball at contact (image space — the ball
     # has no depth estimate).
@@ -118,8 +138,9 @@ def classify_forehand_backhand(
     # Project the wrist's horizontal offset from the torso centre onto the body axis.
     # Positive => wrist is toward the player's anatomical LEFT, independent of camera
     # facing and of how side-on the player is standing.
-    centre = ((left_sh[0] + right_sh[0]) / 2.0, (left_sh[2] + right_sh[2]) / 2.0)
-    rel    = (hitting_pos[0] - centre[0], hitting_pos[2] - centre[1])
+    hitting_z = hitting_pos[2] if len(hitting_pos) > 2 else 0.0
+    centre = ((left_sh[0] + right_sh[0]) / 2.0, (left_z + right_z) / 2.0)
+    rel    = (hitting_pos[0] - centre[0], hitting_z - centre[1])
     side   = (rel[0] * axis[0] + rel[1] * axis[1]) / axis_len
 
     # Forehand = the wrist stayed on its own anatomical side.
