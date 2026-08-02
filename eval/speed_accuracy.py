@@ -33,6 +33,7 @@ from utils import (
     classify_reversals_by_trajectory,
     smooth_trajectories, peak_speed_kmh_near_frame,
     detect_xvelocity_candidates,
+    merge_nearby_candidates,
 )
 
 # Realistic range constants (km/h)
@@ -85,8 +86,10 @@ def evaluate(video_path: str) -> dict:
     # trajectory reversals (contact/bounce), interpolate in between. See
     # utils.ball_state and docs/journal/0003 for why this replaces raw per-frame
     # projection, which is geometrically wrong while the ball is airborne.
-    # matches main.py: union of y-reversal + x-velocity candidates (docs/journal/0015)
-    raw_reversals = sorted(set(ball_tracker.get_ball_shot_frames(ball_dets)) | set(detect_xvelocity_candidates(ball_dets)))
+    # matches main.py: union of y-reversal + x-velocity candidates, merged (docs/journal/0018)
+    raw_reversals = merge_nearby_candidates(
+        sorted(set(ball_tracker.get_ball_shot_frames(ball_dets)) | set(detect_xvelocity_candidates(ball_dets)))
+    )
     floor_states  = classify_floor_level(raw_reversals, len(frames))
     ball_mini     = mini_crt.convert_ball_to_mini_court_coordinates(
         ball_dets, all_kp, floor_states, use_homography=True
