@@ -134,8 +134,12 @@ class UILayoutManager:
             # But also make sure it's visible in frame
             stats_y = min(stats_y, self.frame_height - self.stats_panel_height - self.padding)
         
+        # Left-aligned, not centred: the near player stands and plays in the
+        # bottom-centre of a broadcast frame, so a centred panel sits directly on
+        # top of the action it is describing. The bottom-left corner is over the
+        # doubles alley, which is empty for most of a rally.
         self.stats_zone = {
-            'x': (self.frame_width - self.stats_panel_width) // 2,  # Centered
+            'x': self.padding,
             'y': stats_y,
             'width': self.stats_panel_width,
             'height': self.stats_panel_height
