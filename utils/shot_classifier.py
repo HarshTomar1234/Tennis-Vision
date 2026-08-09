@@ -31,20 +31,25 @@ class ShotClassifier:
         self.SMASH_HEIGHT_THRESHOLD = smash_height_threshold
         self.NET_Y_POSITION_RELATIVE = net_y_relative
         
-    def classify_shots(self, player_mini_court_detections, ball_mini_court_detections, 
-                      ball_shot_frames, mini_court_height):
+    def classify_shots(self, player_mini_court_detections, ball_mini_court_detections,
+                      ball_shot_frames, mini_court_height, serve_frames=None):
         """
         Classify each shot in the tennis match.
-        
+
         Args:
             player_mini_court_detections: Dictionary of player positions on mini court
             ball_mini_court_detections: Dictionary of ball positions on mini court
             ball_shot_frames: List of frame numbers where shots occur
             mini_court_height: Height of the mini court for relative positioning
-            
+            serve_frames: Frames carrying physical serve evidence (see
+                utils/serve_detector.py). When omitted, no shot is labelled a serve —
+                deliberately, because the alternative was labelling whichever shot
+                came first, which is wrong on any clip that starts mid-point.
+
         Returns:
             Dictionary mapping each shot frame to its classification and the player who made it
         """
+        serve_frames = set(serve_frames or ())
         shot_classifications = {}
         
         # Skip if not enough shots
@@ -84,7 +89,7 @@ class ShotClassifier:
                 player_y=player_y,
                 ball_trajectory_y=ball_trajectory_y,
                 mini_court_height=mini_court_height,
-                is_first_shot=(i == 0)
+                is_first_shot=(shot_frame in serve_frames)
             )
             
             # Store classification
@@ -114,8 +119,12 @@ class ShotClassifier:
         # Default shot types based on court position (top/bottom half)
         net_y = mini_court_height * self.NET_Y_POSITION_RELATIVE
         default_shot = self.SHOT_TYPES['FOREHAND']
-        
-        # First shot in sequence is always a serve
+
+        # `is_first_shot` now means "carries serve evidence" (ball struck above the
+        # player's head, from a baseline) rather than "happens to be first in the
+        # clip". The old positional rule labelled a mid-rally groundstroke a serve
+        # whenever a clip started mid-point, which is most of the time — see
+        # utils/serve_detector.py.
         if is_first_shot:
             return self.SHOT_TYPES['SERVE']
         
@@ -193,7 +202,9 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames,
         board_width = max(350, int(width * 0.32))  # Slightly smaller for top-left
         board_height = 120  # Compact height
         board_x = 10  # Left edge with small padding
-        board_y = height - 200  # Position above player stats area
+        # Top-left: the court's far baseline sits well below this in a broadcast
+        # frame, and the player-stats panel now owns the bottom-left corner.
+        board_y = 45
         
         # Draw semi-transparent background
         overlay = frame.copy()
@@ -262,7 +273,11 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames,
         
         # Add a legend for shot types at the bottom right 
         # CAMERA-ROBUST: Position to avoid overlapping with mini court and show all items
-        legend_width = 150
+        # Size the panel to its own title rather than a guessed constant — at 150px
+        # the title overflowed the box and was clipped by the frame edge.
+        legend_title = "SHOT TYPE LEGEND"
+        (title_w, _), _ = cv2.getTextSize(legend_title, font, 0.65, thickness)
+        legend_width = max(150, title_w + 30)
         legend_height = 165  # Increased to fit 5 shot types
         legend_x = width - legend_width - 10  # Right edge
         legend_y = height - legend_height - 50  # Move up to avoid cutoff
@@ -275,7 +290,8 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames,
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
         # Add legend title
-        cv2.putText(frame, "SHOT TYPE LEGEND", (legend_x + 35, legend_y + 25), 
+        cv2.putText(frame, legend_title,
+                   (legend_x + (legend_width - title_w) // 2, legend_y + 25),
                    font, 0.65, (255, 255, 255), thickness)
         
         # Add each shot type with its color
