@@ -12,15 +12,103 @@ class PlayerTracker:
         self.model = YOLO(model_path)
 
 
+    # A chosen track must appear in at least this share of the clip. Deliberately
+    # permissive: a player who leaves frame for a long stretch (wide angles,
+    # replays) should still qualify, while a line judge the detector catches for a
+    # handful of frames should not.
+    MIN_TRACK_PERSISTENCE = 0.15
+
     def choose_and_filter_players(self, player_detections, court_keypoints):
-        player_detections_first_frame = player_detections[0]
-        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame)
+        """
+        Choose the two players once for the whole clip, then keep only their tracks.
+
+        Evidence is aggregated over every frame rather than read off frame 0. A
+        broadcast clip's first frame is arbitrary — it may open on a replay wipe or
+        with a player off-screen — and in any single frame a line judge or ball kid
+        can outscore a real player. Track persistence across the clip is what
+        separates them: players are present for most of a rally, incidental people
+        are not.
+        """
+        chosen_player = self._choose_players_over_clip(player_detections, court_keypoints)
         filtered_player_detections = []
         for player_dict in player_detections:
             filtered_player_dict = {track_id: bbox for track_id, bbox in player_dict.items() if track_id in chosen_player}
             filtered_player_detections.append(filtered_player_dict)
 
         return filtered_player_detections
+
+    def _choose_players_over_clip(self, player_detections, court_keypoints):
+        """
+        Rank every track seen anywhere in the clip and return the chosen track ids.
+
+        Returns one player per court half when both halves yield a qualifying
+        track. When only one does — a camera angle where the near baseline sits
+        outside the frame, for instance — it returns that single player rather than
+        promoting the next-best track, which in practice is a line judge or ball
+        kid and would poison every downstream metric.
+        """
+        totals = {}
+        for player_dict in player_detections:
+            if not player_dict:
+                continue
+            for cand in self._score_candidates(court_keypoints, player_dict):
+                acc = totals.setdefault(
+                    cand['id'], {'score_sum': 0.0, 'frames': 0, 'bottom_votes': 0}
+                )
+                acc['score_sum']   += cand['score']
+                acc['frames']      += 1
+                acc['bottom_votes'] += 1 if cand['is_bottom_half'] else 0
+
+        if not totals:
+            print("  [PLAYER SELECTION V3] WARNING: no player tracks found in clip")
+            return []
+
+        min_frames = max(1, int(len(player_detections) * self.MIN_TRACK_PERSISTENCE))
+        candidates = [
+            {
+                'id':             track_id,
+                'score':          acc['score_sum'] / acc['frames'],
+                'frames':         acc['frames'],
+                # Half is decided by majority vote over the frames the track was
+                # seen in, so a player crossing the net mid-rally doesn't flip it.
+                'is_bottom_half': acc['bottom_votes'] * 2 >= acc['frames'],
+            }
+            for track_id, acc in totals.items()
+            if acc['frames'] >= min_frames
+        ]
+
+        print(f"  [PLAYER SELECTION V3] {len(totals)} tracks seen, "
+              f"{len(candidates)} persist ≥{min_frames}/{len(player_detections)} frames:")
+        for c in sorted(candidates, key=lambda c: c['score'], reverse=True):
+            half = "BOTTOM" if c['is_bottom_half'] else "TOP"
+            print(f"    ID {c['id']}: mean score={c['score']:.1f}, "
+                  f"seen={c['frames']}, half={half}")
+
+        # No track cleared the persistence bar (very short or heavily occluded
+        # clip). Fall back to the longest-lived tracks so the run still produces
+        # something, and say so.
+        if not candidates:
+            print("  [PLAYER SELECTION V3] WARNING: no track met persistence bar, "
+                  "falling back to longest-lived")
+            longest = sorted(totals.items(), key=lambda kv: kv[1]['frames'], reverse=True)
+            return [track_id for track_id, _ in longest[:2]]
+
+        bottom = sorted([c for c in candidates if c['is_bottom_half']],
+                        key=lambda c: c['score'], reverse=True)
+        top    = sorted([c for c in candidates if not c['is_bottom_half']],
+                        key=lambda c: c['score'], reverse=True)
+
+        chosen = [group[0] for group in (bottom, top) if group]
+        for c, label in zip(chosen, ("BOTTOM" if bottom else "TOP", "TOP")):
+            print(f"  [PLAYER SELECTION V3] {label} half winner: ID {c['id']} "
+                  f"(mean score={c['score']:.1f}, seen {c['frames']} frames)")
+
+        if len(chosen) < 2:
+            print("  [PLAYER SELECTION V3] WARNING: only one half has a qualifying "
+                  "player — analysing a single player rather than guessing a second")
+
+        print(f"  [PLAYER SELECTION V3] Final chosen: {[c['id'] for c in chosen]}")
+        return [c['id'] for c in chosen]
 
 
     def choose_players(self, court_keypoints, player_dict):
@@ -38,81 +126,9 @@ class PlayerTracker:
         """
         if len(player_dict) < 2:
             return list(player_dict.keys())
-        
-        # Calculate court bounds
-        court_bounds = self._estimate_court_bounds(court_keypoints)
-        court_mid_y = (court_bounds['top'] + court_bounds['bottom']) / 2
-        
-        # Score all candidates
-        candidates = []
-        for track_id, bbox in player_dict.items():
-            x1, y1, x2, y2 = bbox
-            player_center = get_center_of_bbox(bbox)
-            bbox_height = y2 - y1
-            bbox_width = x2 - x1
-            bbox_area = bbox_height * bbox_width
-            
-            score = 0
-            
-            # ====== CRITERION 1: Inside court bounds (+80 points) ======
-            if self._is_inside_court(player_center, court_bounds, margin=50):
-                score += 80
-            elif self._is_inside_court(player_center, court_bounds, margin=150):
-                score += 40
-            
-            # ====== CRITERION 2: Bounding box size (+60 points max) ======
-            # Real players appear LARGER than ball boys due to camera focus
-            area_score = min(bbox_area / 800, 60)
-            score += area_score
-            
-            # ====== CRITERION 3: Aspect ratio (+30 points) ======
-            aspect_ratio = bbox_height / max(bbox_width, 1)
-            if 1.5 <= aspect_ratio <= 4.0:
-                score += 30
-            elif 1.0 <= aspect_ratio <= 1.5:
-                score += 15
-            
-            # ====== CRITERION 4: Near baseline position (+50 points) ======
-            # Real players are at TOP or BOTTOM of court (baselines)
-            # Ball boys are at LEFT/RIGHT SIDES
-            player_y = player_center[1]
-            player_x = player_center[0]
-            
-            # Distance from horizontal center line (net)
-            distance_from_net_line = abs(player_y - court_mid_y)
-            court_half_height = (court_bounds['bottom'] - court_bounds['top']) / 2
-            
-            # Players at baseline have high Y-distance from net
-            baseline_score = 50 * (distance_from_net_line / court_half_height)
-            baseline_score = min(baseline_score, 50)  # Cap at 50
-            score += baseline_score
-            
-            # ====== CRITERION 5: X position near center (+40 points) ======
-            # Real players move along CENTER of court (left-right)
-            # Ball boys are at EXTREME left or right edges
-            court_center_x = (court_bounds['left'] + court_bounds['right']) / 2
-            court_half_width = (court_bounds['right'] - court_bounds['left']) / 2
-            distance_from_center_x = abs(player_x - court_center_x)
-            
-            # Lower distance from center X = higher score
-            x_center_score = 40 * (1 - min(distance_from_center_x / court_half_width, 1))
-            score += x_center_score
-            
-            # ====== CRITERION 6: Minimum size requirement (+20 points) ======
-            if bbox_height > 80 and bbox_width > 30:
-                score += 20
-            
-            # Determine if player is in top or bottom half
-            is_bottom_half = player_y > court_mid_y
-            
-            candidates.append({
-                'id': track_id,
-                'score': score,
-                'bbox': bbox,
-                'center': player_center,
-                'is_bottom_half': is_bottom_half
-            })
-        
+
+        candidates = self._score_candidates(court_keypoints, player_dict)
+
         # Debug output
         print(f"  [PLAYER SELECTION V2] All candidates:")
         for c in candidates:
@@ -148,6 +164,88 @@ class PlayerTracker:
         print(f"  [PLAYER SELECTION V2] Final chosen: {chosen_players}")
         return chosen_players
     
+    def _score_candidates(self, court_keypoints, player_dict):
+        """
+        Score every detection in one frame on how player-like it is.
+
+        Six criteria, each documented inline below. The scoring is deliberately
+        geometric rather than appearance-based: it separates players from ball kids
+        and line judges using where they stand and how large they appear, which
+        holds across courts and broadcasts without any per-video tuning.
+
+        Returns a list of dicts: id, score, bbox, center, is_bottom_half.
+        """
+        court_bounds = self._estimate_court_bounds(court_keypoints)
+        court_mid_y = (court_bounds['top'] + court_bounds['bottom']) / 2
+
+        candidates = []
+        for track_id, bbox in player_dict.items():
+            x1, y1, x2, y2 = bbox
+            player_center = get_center_of_bbox(bbox)
+            bbox_height = y2 - y1
+            bbox_width = x2 - x1
+            bbox_area = bbox_height * bbox_width
+
+            score = 0
+
+            # ====== CRITERION 1: Inside court bounds (+80 points) ======
+            if self._is_inside_court(player_center, court_bounds, margin=50):
+                score += 80
+            elif self._is_inside_court(player_center, court_bounds, margin=150):
+                score += 40
+
+            # ====== CRITERION 2: Bounding box size (+60 points max) ======
+            # Real players appear LARGER than ball boys due to camera focus
+            area_score = min(bbox_area / 800, 60)
+            score += area_score
+
+            # ====== CRITERION 3: Aspect ratio (+30 points) ======
+            aspect_ratio = bbox_height / max(bbox_width, 1)
+            if 1.5 <= aspect_ratio <= 4.0:
+                score += 30
+            elif 1.0 <= aspect_ratio <= 1.5:
+                score += 15
+
+            # ====== CRITERION 4: Near baseline position (+50 points) ======
+            # Real players are at TOP or BOTTOM of court (baselines)
+            # Ball boys are at LEFT/RIGHT SIDES
+            player_y = player_center[1]
+            player_x = player_center[0]
+
+            # Distance from horizontal center line (net)
+            distance_from_net_line = abs(player_y - court_mid_y)
+            court_half_height = (court_bounds['bottom'] - court_bounds['top']) / 2
+
+            # Players at baseline have high Y-distance from net
+            baseline_score = 50 * (distance_from_net_line / max(court_half_height, 1))
+            baseline_score = min(baseline_score, 50)  # Cap at 50
+            score += baseline_score
+
+            # ====== CRITERION 5: X position near center (+40 points) ======
+            # Real players move along CENTER of court (left-right)
+            # Ball boys are at EXTREME left or right edges
+            court_center_x = (court_bounds['left'] + court_bounds['right']) / 2
+            court_half_width = (court_bounds['right'] - court_bounds['left']) / 2
+            distance_from_center_x = abs(player_x - court_center_x)
+
+            # Lower distance from center X = higher score
+            x_center_score = 40 * (1 - min(distance_from_center_x / max(court_half_width, 1), 1))
+            score += x_center_score
+
+            # ====== CRITERION 6: Minimum size requirement (+20 points) ======
+            if bbox_height > 80 and bbox_width > 30:
+                score += 20
+
+            candidates.append({
+                'id': track_id,
+                'score': score,
+                'bbox': bbox,
+                'center': player_center,
+                'is_bottom_half': player_y > court_mid_y,
+            })
+
+        return candidates
+
     def _estimate_court_bounds(self, court_keypoints):
         """
         Estimate the bounding box of the court from keypoints.
@@ -212,13 +310,16 @@ class PlayerTracker:
 
         player_dict = {}
         for box in results.boxes:
-            track_id = int(box.id.tolist()[0])
-            result = box.xyxy.tolist()[0]
             object_cls_id = box.cls.tolist()[0]
-            object_cls_name = id_name_dict[object_cls_id]
-            if object_cls_name == "person":
-                player_dict[track_id] = result
-        
+            if id_name_dict[object_cls_id] != "person":
+                continue
+            # ByteTrack returns detections it has not yet confirmed into a track with
+            # id=None. Player selection scores candidates by ID across frames, so a
+            # detection with no stable ID is unusable — skip it rather than invent one.
+            if box.id is None:
+                continue
+            player_dict[int(box.id.tolist()[0])] = box.xyxy.tolist()[0]
+
         return player_dict
     
     def filter_by_confidence(self, player_detections, confidence_threshold=0.7):
