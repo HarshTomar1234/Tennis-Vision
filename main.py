@@ -27,9 +27,11 @@ from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
 from trackers import BallTracker, PlayerTracker
 from utils import (
+    MIN_LINE_SUPPORT,
     PoseEstimator,
     ShotClassifier,
     UILayoutManager,
+    assess_court_fit,
     classify_contact_vs_bounce,
     classify_floor_level,
     classify_forehand_backhand,
@@ -45,6 +47,9 @@ from utils import (
     save_video,
     smooth_trajectories,
 )
+from utils.bounce_candidates import detect_bounce_candidates
+from utils.serve_detector import detect_serve_frames
+from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
 
 # ── Config & CLI ───────────────────────────────────────────────────────────────
@@ -138,7 +143,9 @@ def setup_logging(cfg: dict) -> logging.Logger:
 
 # ── Stats output ───────────────────────────────────────────────────────────────
 
-def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger):
+def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
+               court_fit: tuple[bool, float] | None = None,
+               serve_speed_kmh: float = 0.0):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -162,6 +169,22 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger):
         "avg_player_speed_p1_kmh": _safe("player_1_average_player_speed"),
         "avg_player_speed_p2_kmh": _safe("player_2_average_player_speed"),
     }
+    if serve_speed_kmh > 0:
+        # Named for what it is: average over the flight, not a radar-equivalent
+        # contact speed. Consumers must not present it as the latter.
+        summary["serve_avg_flight_speed_kmh"] = round(serve_speed_kmh, 1)
+    if court_fit is not None:
+        # Consumers must be able to tell a measured speed from one derived off a
+        # court fitted to the wrong part of the frame — the numbers look identical.
+        is_valid, support = court_fit
+        summary["court_calibrated"] = bool(is_valid)
+        summary["court_line_support"] = round(float(support), 3)
+        if not is_valid:
+            summary["warning"] = (
+                "Court fit failed validation — speeds, distances and mini-court "
+                "positions are derived from an unreliable court and should not be "
+                "treated as measurements."
+            )
     json_path = out / f"summary_{stamp}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -294,14 +317,30 @@ def main():
 
     logger.info(f"  {len(all_court_keypoints)} keypoint sets ready")
 
+    court_fit = assess_court_fit(video_frames, all_court_keypoints)
+    court_valid, line_support = court_fit
+    if court_valid:
+        logger.info(f"  Court fit OK (line support {line_support:.3f})")
+    else:
+        logger.warning(
+            f"  COURT FIT FAILED VALIDATION (line support {line_support:.3f} < "
+            f"{MIN_LINE_SUPPORT}). The detected keypoints do not lie on painted "
+            f"court lines, so speeds, distances and mini-court positions from this "
+            f"run are NOT measurements. See utils/court_validity.py."
+        )
+
     # ── 5. Player selection ────────────────────────────────────────
     logger.info("[5/9] Filtering to 2 main players...")
     player_detections = player_tracker.choose_and_filter_players(
         player_detections, court_keypoints
     )
 
-    first_frame_ids = sorted(player_detections[0].keys())
-    player_id_map = {orig: new for new, orig in enumerate(first_frame_ids[:2], start=1)}
+    # Build the id map from every frame, not frame 0: selection already narrowed
+    # this to the chosen players, but a player can be absent from the opening
+    # frame (replay wipe, off-screen at serve) and reading only frame 0 would
+    # silently drop them from the whole run.
+    chosen_ids = sorted({track_id for frame in player_detections for track_id in frame})
+    player_id_map = {orig: new for new, orig in enumerate(chosen_ids[:2], start=1)}
     logger.info(f"  Player ID mapping: {player_id_map}")
 
     normalized: list[dict] = []
@@ -331,10 +370,19 @@ def main():
     # docs/journal/0015 and utils.hit_bounce_classifier.detect_xvelocity_candidates.
     yrev_frames = ball_tracker.get_ball_shot_frames(ball_detections)
     xvel_frames = detect_xvelocity_candidates(ball_detections)
-    # The two generators can each fire within a few frames of the same real event with
+    # Third source, added 2026-08-09: a dedicated BOUNCE generator. The other two are
+    # hit-shaped by construction — measured on the full 95-clip labelled dataset,
+    # x-velocity recalls only 12.0% of real bounces (it looks for the horizontal
+    # reversal that defines a racket strike) while this one recalls 83.9%. Without it
+    # the serve's landing was routinely never proposed, so serve speed paired the
+    # contact with a later rally event. See eval/bounce_candidate_recall.py.
+    bounce_frames_raw = detect_bounce_candidates(ball_detections)
+    # The generators can each fire within a few frames of the same real event with
     # no knowledge of each other, inflating apparent shot count and making per-frame
     # work (pose) sensitive to which nearby duplicate gets checked. See docs/journal/0018.
-    raw_reversal_frames = merge_nearby_candidates(sorted(set(yrev_frames) | set(xvel_frames)))
+    raw_reversal_frames = merge_nearby_candidates(
+        sorted(set(yrev_frames) | set(xvel_frames) | set(bounce_frames_raw))
+    )
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
     # bounce) is a valid homography anchor — the floor transform is correct at floor
@@ -413,9 +461,19 @@ def main():
             smash_height_threshold=sc_cfg.get("smash_height_threshold", 0.7),
             net_y_relative=sc_cfg.get("net_y_position_relative", 0.5),
         )
+        # Serves are identified from physical evidence (ball struck above the
+        # player's head, from a baseline) rather than from position in the sequence.
+        court_kp = mini_court.get_court_drawing_keypoints()
+        serve_frames = detect_serve_frames(
+            ball_shot_frames, ball_detections, player_detections, player_mini_court,
+            far_baseline_y=court_kp[1], near_baseline_y=court_kp[5],
+        )
+        logger.info(f"  Serve detection: {len(serve_frames)} of {len(ball_shot_frames)} "
+                    f"contacts carry serve evidence {serve_frames if serve_frames else ''}")
+
         shot_classifications = shot_classifier.classify_shots(
             player_mini_court, ball_mini_court, ball_shot_frames,
-            mini_court.court_drawing_height,
+            mini_court.court_drawing_height, serve_frames=serve_frames,
         )
         # Upgrade forehand/backhand from real body geometry where pose is available.
         # Serve, Volley and Smash keep their existing rules — those are genuine physical
@@ -566,7 +624,37 @@ def main():
     logger.info(f"  P2: {int(stats_df['player_2_number_of_shots'].iloc[-1])} shots, "
                 f"avg {stats_df['player_2_average_shot_speed'].iloc[-1]:.1f} km/h")
 
-    save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger)
+    # Serve speed, measured from floor-anchored geometry only (server's feet at
+    # contact, ball's first bounce) — the one speed in this pipeline that never
+    # touches an airborne ball's floor projection. See utils/serve_speed.py.
+    serve_speed = 0.0
+    serve_reject = ""
+    serve_pair = find_serve_and_bounce(shot_classifications, bounce_frames, fps)
+    if serve_pair:
+        contact_frame, bounce_frame = serve_pair
+        server_id = shot_classifications[contact_frame].get("player_id")
+        contact_pos = player_mini_court.get(contact_frame, {}).get(server_id)
+        bounce_pos  = ball_mini_court.get(bounce_frame, {}).get(1)
+
+        kp_mc = mini_court.get_court_drawing_keypoints()
+        net_y = (kp_mc[1] + kp_mc[5]) / 2.0
+        if bounce_is_in_service_box(contact_pos, bounce_pos, net_y,
+                                    far_service_y=kp_mc[17], near_service_y=kp_mc[21]):
+            serve_speed = serve_speed_kmh(
+                contact_pos, bounce_pos,
+                contact_frame, bounce_frame, px_to_m_scale, fps,
+                max_realistic_kmh=constants.MAX_REALISTIC_BALL_SPEED_KMH,
+            )
+        else:
+            serve_reject = " (landing not in the service box — bounce misclassified)"
+    if serve_speed > 0:
+        logger.info(f"  Serve: {serve_speed:.1f} km/h (average over flight, "
+                    f"contact f{serve_pair[0]} → bounce f{serve_pair[1]})")
+    else:
+        logger.info(f"  Serve: not measurable{serve_reject or ' (no serve/bounce pair with valid positions)'}")
+
+    save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger,
+               court_fit=court_fit, serve_speed_kmh=serve_speed)
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")
