@@ -5,10 +5,19 @@ from torchvision import models
 import numpy as np
 
 class CourtLineDetector:
-    def __init__(self, model_path):
+    def __init__(self, model_path, device=None):
+        """
+        Args:
+            model_path: path to the trained ResNet-50 keypoint regression weights.
+            device:     torch device string. Defaults to CUDA when available —
+                        keypoint detection runs once per frame and was the slowest
+                        stage of the pipeline by a wide margin while pinned to CPU.
+        """
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = models.resnet50(pretrained=True)
-        self.model.fc = torch.nn.Linear(self.model.fc.in_features, 14*2) 
+        self.model.fc = torch.nn.Linear(self.model.fc.in_features, 14*2)
         self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
+        self.model.to(self.device).eval()
         self.transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((224, 224)),
@@ -20,7 +29,7 @@ class CourtLineDetector:
 
     
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image_tensor = self.transform(image_rgb).unsqueeze(0)
+        image_tensor = self.transform(image_rgb).unsqueeze(0).to(self.device)
         with torch.no_grad():
             outputs = self.model(image_tensor)
         keypoints = outputs.squeeze().cpu().numpy()
