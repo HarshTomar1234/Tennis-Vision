@@ -59,6 +59,13 @@ external/
 # datasets/labels/ (our own hand labels, small CSVs) is intentionally NOT ignored.
 datasets/external/
 
+# Evaluation footage: large binaries, and third-party broadcast material we only
+# hold locally for testing. The manifests and the eval scripts are the reproducible
+# part and are tracked; the video is not redistributed through this repo.
+datasets/evail_clips/
+datasets/serve_clips/
+datasets/source_videos/
+
 # Claude Code local session data
 .claude/
 
