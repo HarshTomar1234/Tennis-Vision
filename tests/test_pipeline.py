@@ -213,13 +213,17 @@ class TestStatsSave:
 @pytest.mark.slow
 def test_full_pipeline_smoke(tmp_path):
     """
-    End-to-end smoke test: runs the pipeline on 30 frames with stubs,
-    checks that output video and stats CSV are created and non-empty.
+    End-to-end smoke test: runs the real pipeline on a short slice of video and
+    checks that an output video is produced.
 
-    Requires:
-      - input_videos/input_video_2.mp4
-      - models/last.pt, models/keypoints_model.pth
-      - tracker_stubs/player_detections.pkl
+    Deliberately does NOT rely on cached detection stubs. Stubs are gitignored (they
+    are per-video caches, and shipping one makes a newcomer analyse their clip with
+    another clip's detections), so a test that needed them would pass only on a
+    machine that had already run the pipeline — exactly the machine where a break is
+    least likely to be noticed. --max-frames keeps a fresh-detection run fast enough
+    to stay a smoke test.
+
+    Requires the model weights: python scripts/download_models.py
     """
     import subprocess, shutil
 
@@ -231,9 +235,11 @@ def test_full_pipeline_smoke(tmp_path):
             sys.executable, "main.py",
             "--input",  "input_videos/input_video_2.mp4",
             "--output", out_video,
-            "--fast",           # first-frame keypoints, no ByteTrack
+            "--fast",             # first-frame keypoints, no ByteTrack
+            "--no-stubs",         # fresh detection; never depend on a cache
+            "--max-frames", "40",
         ],
-        capture_output=True, text=True, timeout=300
+        capture_output=True, text=True, timeout=600
     )
 
     # Pipeline should exit 0

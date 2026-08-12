@@ -62,6 +62,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-stubs", action="store_true", help="Disable cached stubs, force fresh detection")
     p.add_argument("--fast",     action="store_true", help="Fast mode: first-frame keypoints, no ByteTrack")
     p.add_argument("--debug",    action="store_true", help="Enable DEBUG log level")
+    p.add_argument("--max-frames", type=int, default=0, metavar="N",
+                   help="Process only the first N frames (0 = all). Useful for a quick "
+                        "check on a long video before committing to a full run.")
     return p.parse_args()
 
 
@@ -226,6 +229,14 @@ def main():
     logger.info("[1/9] Loading video frames...")
     input_path = cfg["io"]["input_video"]
     video_frames = read_video(input_path)
+    if not video_frames:
+        logger.error(f"No frames could be read from {input_path}. The file may be "
+                     f"missing, empty, or in a codec OpenCV cannot decode.")
+        sys.exit(1)
+
+    if args.max_frames and args.max_frames < len(video_frames):
+        logger.info(f"  Limiting to first {args.max_frames} frames (--max-frames)")
+        video_frames = video_frames[:args.max_frames]
 
     cap = cv2.VideoCapture(input_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
