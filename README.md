@@ -24,11 +24,18 @@ measured yet, it's marked as such rather than estimated.
 git clone https://github.com/HarshTomar1234/Tennis-Vision.git
 cd Tennis-Vision
 
-pip install -r requirements.txt
+pip install -e .                        # or: pip install -r requirements.txt
+tennis-vision download-models           # fetches model weights (~140 MB)
 
-# Runs configs/config.yaml's default input video, writes to output/videos/output_video.avi
-python main.py
+# Analyse the bundled sample clip
+tennis-vision analyze input_videos/input_video_2.mp4 -o output/demo.avi
 ```
+
+`tennis-vision download-models` prints one manual step: the TrackNet ball-detection
+weights belong to their original author and are fetched from that project rather than
+rehosted here. Everything else downloads automatically.
+
+Add `--max-frames 60` for a quick check before committing to a full run.
 
 ## Features
 
@@ -92,13 +99,28 @@ Tennis-Vision/
    pip install -r requirements.txt
    ```
 
-2. Model weights (gitignored — download separately):
-   - Player detection: YOLOv8x auto-downloads via `ultralytics` on first run
-   - Court keypoints: `models/keypoints_model.pth` (ResNet-50, place manually)
-   - Ball detection (TrackNet): `models/tracknet.pt` — see download command in
-     `configs/config.yaml`
-   - Pose (forehand/backhand): `models/pose_landmarker_lite.task` — see download
-     command in `configs/config.yaml`
+2. Model weights (gitignored — fetched by script, not committed):
+   ```bash
+   python scripts/download_models.py     # same as: tennis-vision download-models
+   ```
+
+   | Weight | Size | Source |
+   |---|---|---|
+   | Court keypoints (`keypoints_model_geoaug.pth`) | 95 MB | [Coddieharsh/tennis-court-keypoints](https://huggingface.co/Coddieharsh/tennis-court-keypoints) — automatic |
+   | Pose (`pose_landmarker_lite.task`) | 6 MB | Google MediaPipe — automatic |
+   | Ball detection (`tracknet.pt`) | 43 MB | [yastrebksv/TrackNet](https://github.com/yastrebksv/TrackNet) — **one manual command**, printed by the script |
+   | Player detection (YOLOv8) | — | auto-downloads via `ultralytics` on first run |
+
+   The court model is our fine-tune, published with a model card recording provenance
+   and per-surface accuracy. TrackNet's weights are the upstream author's and their
+   licence is unstated, so we point at the original rather than redistribute them.
+
+3. Optional — caching for repeated runs on one clip:
+   ```bash
+   tennis-vision analyze clip.mp4 -c configs/dev.yaml
+   ```
+   Detection caches are **off by default**: a cache holds one specific video's
+   detections, so using it on a different clip produces confident nonsense.
 
 ## Usage
 
@@ -116,8 +138,12 @@ thresholds, I/O paths) live in `configs/config.yaml` — no magic numbers in cod
 
 ## Measured Results
 
-Every number below is from a named eval script, reproducible with one command. Dated
-because these are still-moving numbers on an active sprint branch, not final claims.
+Every number below names the eval script that produced it. Dated, because these are
+still-moving numbers on an active sprint branch, not final claims.
+
+**Reproducibility, stated honestly:** scripts marked 📦 need a third-party dataset
+(7+ GB, not redistributable — see `datasets/README.md` for the source). Scripts marked
+✅ run against what ships in this repo plus the downloadable weights.
 
 ### Ball tracking (as of 2026-08-01)
 
@@ -125,8 +151,11 @@ because these are still-moving numbers on an active sprint branch, not final cla
 |---|---|---|
 | Raw ball detection rate (TrackNet) | 82.5% (470/570 frames) | pipeline log |
 | Shot-frame accuracy | 7/7 matched, mean offset 4.9 frames — EXCELLENT | `eval/shot_frame_accuracy.py` |
-| Ball speed plausibility | 21/21 in physical range (36.6–181.6 km/h) — PASS | `eval/speed_accuracy.py` |
-| Player speed plausibility | 21/21 in physical range | `eval/speed_accuracy.py` |
+| Ball speed *plausibility* (a range check, **not** accuracy) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
+| Player speed *plausibility* (range check) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
+
+> ⚠️ Those two rows check that speeds are *physically possible*, not that they are
+> *correct*. Rally speeds are currently **systematically low** — see Limitations.
 
 ### Contact/bounce event detection, at real dataset scale (91 clips, TrackNet's own
 training data — same lineage as `models/tracknet.pt`, not a foreign benchmark)
@@ -153,18 +182,62 @@ unavailable or ambiguous — reported, not hidden).
 
 ### Test suite
 
-76 unit + integration tests passing (`pytest tests/`), covering ball-state
+83 unit + integration tests passing (`pytest tests/`), covering ball-state
 classification, Kalman smoothing (including the physical speed-plausibility gate),
 mini-court coordinate mapping, trajectory drawing, pose-based shot classification, and
-the hit/bounce classifier.
+the hit/bounce classifier. The end-to-end smoke test runs genuine fresh detection —
+it depends on no cached artefacts, so it fails for everyone if the pipeline breaks.
 
-### Not yet measured
+### Court keypoint accuracy (2026-08-09)
 
-Player detection accuracy and court keypoint accuracy have no eval script against
-ground truth yet — they're visually verified working (see the journal in `docs/`, local
-only) but not claimed as measured numbers here. Per-shot-type accuracy (forehand vs.
-backhand vs. serve, individually) also isn't separately measured — the pose-based
-forehand/backhand result above is the closest verified proxy.
+Held-out validation split of the TennisCourtDetector dataset, 2,211 images:
+
+| Metric | Base weights | Fine-tuned (shipped) | Script |
+|---|---|---|---|
+| Median keypoint error | 4.03 px | **2.90 px** | 📦 `eval/court_keypoint_accuracy.py` |
+| Images with all 14 keypoints within 25 px | 96.8 % | **98.3 %** | 📦 same |
+| Real clips passing the court-validity gate | 4/9 | **8/9** | 📦 `eval/court_validity_calibration.py` |
+
+Per-surface median error is near-identical (hard 3.90 px, clay 4.58 px, grass/green
+4.65 px), so surface is not a weakness; camera framing is. Validated on Wimbledon
+grass the model had never seen.
+
+---
+
+## Limitations
+
+Stated plainly, because the point of this project is that its numbers are honest.
+
+**Wrong today:**
+- **Rally shot speeds are systematically low.** The ball is projected through the
+  *floor* homography while it is airborne ~90 % of the time, so derived speeds are
+  wrong by an amount that varies with camera geometry. The fix is 3-D trajectory
+  reconstruction (roadmap below), not a tuning change.
+- **Serve speed is implemented but unvalidated.** It uses only floor-valid geometry
+  (server's feet, ball's bounce), and refuses to report rather than guess when its
+  physical gates fail — but it has not yet been confirmed against radar ground truth.
+
+**Unmeasured:**
+- Volley and Smash labels come from position rules with **no ground truth**. Serve is
+  now detected from physical evidence; those two are not.
+- The learned shot classifier (73.4 % on unseen subjects, 6 classes) is trained on
+  THETIS *indoor demonstration* footage and is **not wired into the pipeline** —
+  transfer to broadcast video is unvalidated.
+- Player detection accuracy has no ground-truth eval script.
+
+**Out of scope right now:**
+- **Ground-level cameras fail.** Validated on broadcast and elevated fixed-camera
+  footage only. The validity gate flags these rather than reporting wrong numbers.
+- **Doubles and amateur footage are untested** — every evaluation clip is broadcast
+  singles.
+
+## Roadmap
+
+- 3-D ball trajectory reconstruction — the fix for rally speeds *and* the basis for a
+  3-D rally viewer. These are the same problem: a correct 3-D trajectory is what makes
+  a speed correct.
+- Validate the temporal shot classifier on broadcast footage, then wire it in.
+- Ground truth for Volley/Smash, so they can be claimed or dropped.
 
 ## Technical Notes
 

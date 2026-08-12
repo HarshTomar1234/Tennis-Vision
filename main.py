@@ -48,6 +48,7 @@ from utils import (
     smooth_trajectories,
 )
 from utils.bounce_candidates import detect_bounce_candidates
+from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
@@ -700,6 +701,13 @@ def main():
         output_frames = court_detector.draw_keypoints_on_video(
             output_frames, court_keypoints, point_color=(0, 140, 255), radius=5
         )
+
+    if not court_valid:
+        # The rendered video is what gets watched and screenshotted, and until this
+        # banner existed it looked identical whether the court was fitted correctly or
+        # fitted to the crowd. Stamp the output so it carries its own caveat.
+        logger.debug("  Stamping calibration warning...")
+        output_frames = draw_calibration_warning(output_frames, line_support)
 
     logger.debug("  Drawing mini court + player/ball positions...")
     output_frames = mini_court.draw_mini_court(output_frames)
