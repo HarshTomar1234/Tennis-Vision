@@ -83,3 +83,7 @@ image copy.png
 image copy 2.png
 *.png.txt
 2026-*-research-*.txt
+
+# Model weights live in Hugging Face and are fetched by scripts/download_models.py.
+# models/ keeps only small tracked data files (classifier weights as JSON).
+models/*.txt
