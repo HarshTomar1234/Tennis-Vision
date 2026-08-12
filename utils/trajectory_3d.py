@@ -64,6 +64,22 @@ CONTACT_HEIGHT_GROUNDSTROKE = 0.9
 CONTACT_HEIGHT_VOLLEY = 1.1
 BOUNCE_HEIGHT = 0.0
 
+# Longest credible single free flight, in seconds. A groundstroke's contact-to-bounce
+# flight runs about 0.4-1.0 s; a high defensive lob is the extreme case and still lands
+# inside ~1.5 s. Anything longer is not one flight — it is two or more with the events
+# between them missed, or a dead-ball period between points that the ball interpolator
+# bridged. A parabola stretched across several flights is both slower and taller than
+# any of them, so admitting one corrupts speed and apex together.
+#
+# Measured on input_video_2 (30 fps, 570 frames): with no effective cap the segment
+# durations ran to 1.73 s and mean speed was 57 km/h; capping at 1.5 s left 18 segments
+# with durations 0.40-1.47 s and mean speed 60 km/h. Most segments (10 of 18) are now
+# under 0.85 s, which is the regime a real flight occupies.
+#
+# 1.5 s rather than something tighter because a genuine lob does reach it — the cap is
+# meant to reject stitched-together flights, not real high balls.
+MAX_PLAUSIBLE_FLIGHT_S = 1.5
+
 
 @dataclass
 class Trajectory3D:
@@ -175,7 +191,7 @@ def reconstruct_rally(
     shot_types: dict[int, str],
     bounce_frames: set[int],
     fps: float,
-    max_flight_s: float = 3.0,
+    max_flight_s: float = MAX_PLAUSIBLE_FLIGHT_S,
 ) -> list[Trajectory3D]:
     """
     Reconstruct every free-flight segment of a rally.
