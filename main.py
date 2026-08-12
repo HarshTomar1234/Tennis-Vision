@@ -50,6 +50,7 @@ from utils import (
 from utils.bounce_candidates import detect_bounce_candidates
 from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
+from utils.trajectory_3d import reconstruct_rally
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
 
@@ -149,7 +150,8 @@ def setup_logging(cfg: dict) -> logging.Logger:
 
 def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                court_fit: tuple[bool, float] | None = None,
-               serve_speed_kmh: float = 0.0):
+               serve_speed_kmh: float = 0.0,
+               trajectories_3d: list | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -189,10 +191,42 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                 "positions are derived from an unreliable court and should not be "
                 "treated as measurements."
             )
+    if trajectories_3d:
+        # Speeds here include the vertical component the floor projection discards, so
+        # they are not comparable with avg_shot_speed_*_kmh above and are named apart.
+        speeds = [t.speed_kmh for t in trajectories_3d]
+        summary["shot_speed_3d_kmh"] = {
+            "segments": len(speeds),
+            "mean": round(sum(speeds) / len(speeds), 1),
+            "max": round(max(speeds), 1),
+            "note": ("Free-flight reconstruction between floor-anchored events. "
+                     "Average over each segment, so below a radar reading at contact; "
+                     "drag and spin are not modelled."),
+        }
+
     json_path = out / f"summary_{stamp}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
     logger.info(f"Summary JSON → {json_path}")
+
+    if trajectories_3d:
+        # Written separately: the viewer needs the full arcs, and embedding a few
+        # thousand points in the summary would drown the numbers a human reads.
+        scene_path = out / f"trajectory3d_{stamp}.json"
+        with open(scene_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "segments": [
+                    {
+                        "start_frame": t.start_frame,
+                        "end_frame": t.end_frame,
+                        "speed_kmh": round(t.speed_kmh, 1),
+                        "apex_height_m": round(t.apex_height_m, 2),
+                        "points": [[round(c, 3) for c in p] for p in t.points],
+                    }
+                    for t in trajectories_3d
+                ],
+            }, f, indent=2)
+        logger.info(f"3-D scene  → {scene_path}")
 
 
 # ── Pipeline ───────────────────────────────────────────────────────────────────
@@ -665,8 +699,35 @@ def main():
     else:
         logger.info(f"  Serve: not measurable{serve_reject or ' (no serve/bounce pair with valid positions)'}")
 
+    # ── 3-D trajectory reconstruction ──────────────────────────────
+    # This is the fix for rally speeds, not a visualisation extra: speeds derived from
+    # the floor projection of an airborne ball are geometrically wrong, and a free-flight
+    # reconstruction between floor-anchored events recovers the vertical component the
+    # projection discards. See utils/trajectory_3d.py.
+    bounce_set = set(bounce_frames)
+    event_frames_3d = sorted(set(ball_shot_frames) | bounce_set)
+    ball_positions_m = {
+        frame: (pos[0] * px_to_m_scale, pos[1] * px_to_m_scale)
+        for frame in event_frames_3d
+        if (pos := ball_mini_court.get(frame, {}).get(1)) is not None
+    }
+    shot_type_by_frame = {f: info.get("shot_type") for f, info in shot_classifications.items()}
+
+    trajectories_3d = reconstruct_rally(
+        event_frames_3d, ball_positions_m, shot_type_by_frame, bounce_set, fps,
+    )
+    if trajectories_3d:
+        speeds_3d = [t.speed_kmh for t in trajectories_3d]
+        logger.info(f"  3-D reconstruction: {len(trajectories_3d)} flight segments | "
+                    f"speed {min(speeds_3d):.0f}-{max(speeds_3d):.0f} km/h "
+                    f"(mean {sum(speeds_3d) / len(speeds_3d):.0f}) | "
+                    f"apex {max(t.apex_height_m for t in trajectories_3d):.1f} m")
+    else:
+        logger.info("  3-D reconstruction: no reconstructable flight segments")
+
     save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger,
-               court_fit=court_fit, serve_speed_kmh=serve_speed)
+               court_fit=court_fit, serve_speed_kmh=serve_speed,
+               trajectories_3d=trajectories_3d)
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")
