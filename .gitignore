@@ -27,6 +27,10 @@ __pycache__/
 runs/
 runs/detect/train/
 
+# Cached detections. These are per-video caches; shipping one means a newcomer runs
+# against a different video's detections unless they know to pass --no-stubs.
+tracker_stubs/*.pkl
+
 # Roboflow training data (large)
 training/tennis-ball-detection-6/
 

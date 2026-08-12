@@ -18,5 +18,12 @@ lapx>=0.5.2
 # above and is stricter about matrix shapes than 4.x — see utils/kalman_smoother.py.
 mediapipe>=1.0.0
 
+# Model weight downloads
+# huggingface-hub fetches the fine-tuned court model; gdown fetches the upstream
+# TrackNet weights, which we point at rather than rehost. Both are required by
+# scripts/download_models.py, i.e. by the documented first-run path.
+huggingface-hub>=0.20.0
+gdown>=4.7.1
+
 # Testing
 pytest>=7.0.0

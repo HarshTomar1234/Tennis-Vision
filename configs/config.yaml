@@ -35,8 +35,11 @@ io:
   tracknet_stub_path: "tracker_stubs/ball_detections_tracknet.pkl"
 
 stubs:
-  use_player_stubs: true    # true = load from disk (fast dev), false = rerun YOLO
-  use_ball_stubs: true      # true = load cached TrackNet detections (fast rerender; set false to re-run detection)
+  # OFF by default, deliberately. A stub is a cache of one specific video's detections;
+  # loading it while analysing a different video silently produces confident nonsense.
+  # For repeated runs on the same clip use configs/dev.yaml, which turns these on.
+  use_player_stubs: false   # true = load from disk (fast dev), false = rerun YOLO
+  use_ball_stubs: false     # true = load cached TrackNet detections (fast rerender)
 
 detection:
   player_confidence: 0.7
