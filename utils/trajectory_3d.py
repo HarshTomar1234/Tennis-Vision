@@ -161,6 +161,7 @@ def reconstruct_segment(
     """
     if start_xy_m is None or end_xy_m is None or duration_s <= 0:
         return None
+    samples = max(1, samples)
 
     vx = (end_xy_m[0] - start_xy_m[0]) / duration_s
     vy = (end_xy_m[1] - start_xy_m[1]) / duration_s

@@ -64,10 +64,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-stubs", action="store_true", help="Disable cached stubs, force fresh detection")
     p.add_argument("--fast",     action="store_true", help="Fast mode: first-frame keypoints, no ByteTrack")
     p.add_argument("--debug",    action="store_true", help="Enable DEBUG log level")
-    p.add_argument("--max-frames", type=int, default=0, metavar="N",
+    p.add_argument("--max-frames", type=_positive_int, default=0, metavar="N",
                    help="Process only the first N frames (0 = all). Useful for a quick "
                         "check on a long video before committing to a full run.")
     return p.parse_args()
+
+
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n < 0:
+        # A negative value would silently slice frames off the END of the video
+        # (frames[:-5]) while the log claimed "first -5 frames".
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {n}")
+    return n
 
 
 _DEFAULTS: dict = {
@@ -112,17 +121,41 @@ _DEFAULTS: dict = {
 }
 
 
+_BASE_CONFIG = "configs/config.yaml"
+
+
+def _merge_yaml_into(cfg: dict, path: str) -> None:
+    with open(path, encoding="utf-8") as f:
+        user = yaml.safe_load(f) or {}
+    for section, values in user.items():
+        if section in cfg and isinstance(values, dict):
+            cfg[section].update(values)
+        else:
+            cfg[section] = values
+
+
 def load_config(config_path: str) -> dict:
-    """Load YAML config and deep-merge over built-in defaults."""
+    """
+    Load configuration as three layers: built-in defaults, then configs/config.yaml,
+    then the requested file.
+
+    The base config always applies. Before this, an alternate config such as
+    configs/dev.yaml only merged over the built-in defaults — so dev.yaml, which
+    documents itself as "identical to config.yaml except caching", silently ran the
+    OLD court model because the fine-tuned weights are configured in config.yaml's
+    models: section, not in the code defaults.
+    """
     cfg = deepcopy(_DEFAULTS)
-    if config_path and os.path.exists(config_path):
-        with open(config_path, encoding="utf-8") as f:
-            user = yaml.safe_load(f) or {}
-        for section, values in user.items():
-            if section in cfg and isinstance(values, dict):
-                cfg[section].update(values)
-            else:
-                cfg[section] = values
+    if os.path.exists(_BASE_CONFIG):
+        _merge_yaml_into(cfg, _BASE_CONFIG)
+    if config_path and os.path.abspath(config_path) != os.path.abspath(_BASE_CONFIG):
+        if os.path.exists(config_path):
+            _merge_yaml_into(cfg, config_path)
+        else:
+            # An explicitly requested config that doesn't exist is a user error, not
+            # a situation to paper over with defaults.
+            print(f"warning: config file not found: {config_path} — "
+                  f"using {_BASE_CONFIG} + built-in defaults", file=sys.stderr)
     return cfg
 
 
@@ -704,24 +737,94 @@ def main():
     # the floor projection of an airborne ball are geometrically wrong, and a free-flight
     # reconstruction between floor-anchored events recovers the vertical component the
     # projection discards. See utils/trajectory_3d.py.
+    #
+    # Endpoint positions are computed here from scratch rather than reusing
+    # ball_mini_court, for two reasons found in review:
+    #   1. At a CONTACT the ball is 0.9-2.6 m in the air, so its floor projection is
+    #      displaced along the camera ray — the very error this module removes. The
+    #      floor-valid measurement at a contact is the hitting player's FEET.
+    #   2. ball_mini_court positions are clamped to the drawing panel's bounds, which
+    #      is right for pixels on screen and wrong for physics input: a wide bounce
+    #      snapped to the panel edge silently shortens the segment.
+    # Positions are origin-referenced to the court's far-left corner so the emitted
+    # JSON is genuine court-frame metres, as the viewer expects.
     bounce_set = set(bounce_frames)
     event_frames_3d = sorted(set(ball_shot_frames) | bounce_set)
-    ball_positions_m = {
-        frame: (pos[0] * px_to_m_scale, pos[1] * px_to_m_scale)
-        for frame in event_frames_3d
-        if (pos := ball_mini_court.get(frame, {}).get(1)) is not None
-    }
-    shot_type_by_frame = {f: info.get("shot_type") for f, info in shot_classifications.items()}
+    trajectories_3d = []
+    if court_valid:
+        court_kp_draw = mini_court.get_court_drawing_keypoints()
+        origin_x, origin_y = court_kp_draw[0], court_kp_draw[1]
+        court_width_m = (court_kp_draw[2] - court_kp_draw[0]) * px_to_m_scale
+        court_length_m = (court_kp_draw[5] - court_kp_draw[1]) * px_to_m_scale
+        # A ball can land out, but not in the stands. An event projecting further than
+        # this beyond the lines is a misclassified event (an airborne point projected
+        # along the camera ray), and one such endpoint corrupts speed AND apex — seen
+        # live: a serve read 366 km/h from a landing that projected ~5x too far.
+        out_margin_m = 5.0
+        _h_cache_3d: dict = {}
+        ball_positions_m = {}
+        hitter_by_frame: dict[int, int] = {}
+        for frame in event_frames_3d:
+            kp = (all_court_keypoints[min(frame, len(all_court_keypoints) - 1)]
+                  if cfg["pipeline"]["per_frame_keypoints"] else court_keypoints)
+            key = tuple(kp)
+            if key not in _h_cache_3d:
+                _h_cache_3d[key] = mini_court.compute_homography(kp)
+            H = _h_cache_3d[key]
+            if H is None:
+                continue
 
-    trajectories_3d = reconstruct_rally(
-        event_frames_3d, ball_positions_m, shot_type_by_frame, bounce_set, fps,
-    )
+            if frame in bounce_set:
+                # A bounce is on the floor: the ball's own projection is valid.
+                bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
+                if bbox is None:
+                    continue
+                point = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+            else:
+                # A contact is airborne: use the hitting player's feet instead.
+                players = player_detections[frame] if frame < len(player_detections) else {}
+                bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
+                if not players or bbox is None:
+                    continue
+                ball_x = (bbox[0] + bbox[2]) / 2.0
+                hitter = min(players, key=lambda pid: abs(
+                    (players[pid][0] + players[pid][2]) / 2.0 - ball_x))
+                px1, _, px2, py2 = players[hitter]
+                point = ((px1 + px2) / 2.0, float(py2))
+                hitter_by_frame[frame] = hitter
+
+            mx, my = mini_court.apply_homography(H, point)
+            x_m = (mx - origin_x) * px_to_m_scale
+            y_m = (my - origin_y) * px_to_m_scale
+            if (-out_margin_m <= x_m <= court_width_m + out_margin_m
+                    and -out_margin_m <= y_m <= court_length_m + out_margin_m):
+                ball_positions_m[frame] = (x_m, y_m)
+
+        shot_type_by_frame = {f: info.get("shot_type") for f, info in shot_classifications.items()}
+        trajectories_3d = reconstruct_rally(
+            event_frames_3d, ball_positions_m, shot_type_by_frame, bounce_set, fps,
+        )
+        # The same player cannot hit the ball twice in a row — the rules require a
+        # bounce or the opponent between. A contact→contact segment with one hitter at
+        # both ends therefore proves an event was missed between them, and its
+        # feet-to-feet "flight" (the distance one player shuffled) is not a ball
+        # trajectory. Seen live: serve→re-serve read 17 km/h over 1.24 s.
+        trajectories_3d = [
+            t for t in trajectories_3d
+            if not (t.start_frame in hitter_by_frame and t.end_frame in hitter_by_frame
+                    and hitter_by_frame[t.start_frame] == hitter_by_frame[t.end_frame])
+        ]
+
     if trajectories_3d:
         speeds_3d = [t.speed_kmh for t in trajectories_3d]
         logger.info(f"  3-D reconstruction: {len(trajectories_3d)} flight segments | "
                     f"speed {min(speeds_3d):.0f}-{max(speeds_3d):.0f} km/h "
                     f"(mean {sum(speeds_3d) / len(speeds_3d):.0f}) | "
                     f"apex {max(t.apex_height_m for t in trajectories_3d):.1f} m")
+    elif not court_valid:
+        # Same refuse-don't-guess rule as serve speed: a reconstruction on an invalid
+        # court fit would be confidently wrong, so none is attempted.
+        logger.info("  3-D reconstruction: skipped (court fit failed validation)")
     else:
         logger.info("  3-D reconstruction: no reconstructable flight segments")
 
@@ -763,13 +866,6 @@ def main():
             output_frames, court_keypoints, point_color=(0, 140, 255), radius=5
         )
 
-    if not court_valid:
-        # The rendered video is what gets watched and screenshotted, and until this
-        # banner existed it looked identical whether the court was fitted correctly or
-        # fitted to the crowd. Stamp the output so it carries its own caveat.
-        logger.debug("  Stamping calibration warning...")
-        output_frames = draw_calibration_warning(output_frames, line_support)
-
     logger.debug("  Drawing mini court + player/ball positions...")
     output_frames = mini_court.draw_mini_court(output_frames)
     output_frames = mini_court.draw_ball_trajectory(output_frames, ball_mini_court)
@@ -793,6 +889,13 @@ def main():
         output_frames = draw_shot_classifications(
             output_frames, shot_classifications, ball_shot_frames
         )
+
+    if not court_valid:
+        # The rendered video is what gets watched and screenshotted, and before this
+        # banner existed it looked identical whether the court was fitted correctly or
+        # fitted to the crowd. Drawn LAST so no panel can paint over the warning.
+        logger.debug("  Stamping calibration warning...")
+        output_frames = draw_calibration_warning(output_frames, line_support)
 
     # Save output
     output_path = cfg["io"]["output_video"]

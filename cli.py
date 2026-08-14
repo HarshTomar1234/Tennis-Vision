@@ -33,6 +33,9 @@ def _cmd_analyze(argv: list[str]) -> int:
                         help="config YAML (use configs/dev.yaml to enable caching)")
     parser.add_argument("--no-stubs", action="store_true",
                         help="force fresh detection, ignoring any cached stubs")
+    parser.add_argument("--max-frames", type=int, default=0, metavar="N",
+                        help="process only the first N frames (0 = all) — quick check "
+                             "on a long video before a full run")
     parser.add_argument("--fast", action="store_true",
                         help="single-frame court keypoints; faster, less camera-robust")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
@@ -47,6 +50,8 @@ def _cmd_analyze(argv: list[str]) -> int:
     forwarded = ["main.py", "--input", args.input, "--config", args.config]
     if args.output:
         forwarded += ["--output", args.output]
+    if args.max_frames:
+        forwarded += ["--max-frames", str(args.max_frames)]
     if args.no_stubs:
         forwarded.append("--no-stubs")
     if args.fast:

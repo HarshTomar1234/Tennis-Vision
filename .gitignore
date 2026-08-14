@@ -87,3 +87,6 @@ image copy 2.png
 # Model weights live in Hugging Face and are fetched by scripts/download_models.py.
 # models/ keeps only small tracked data files (classifier weights as JSON).
 models/*.txt
+
+# Both spellings of the eval-clip directory (the typo'd one predates the rename).
+datasets/eval_clips/

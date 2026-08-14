@@ -1,23 +1,16 @@
-# Development config — fast iteration on ONE clip.
+# Development overrides — fast iteration on ONE clip.
 #
-# Identical to configs/config.yaml except that detection caching is on. Use it when
-# re-running the same video repeatedly (tuning drawing, stats, classification) so YOLO
-# and TrackNet don't re-run every time.
+# Configs are layered: built-in defaults ← configs/config.yaml ← this file. Only the
+# differences from the shipped config belong here; everything else (models, thresholds,
+# paths) comes from config.yaml, so this file cannot silently drift from production.
 #
 #   python main.py -c configs/dev.yaml
+#   tennis-vision analyze clip.mp4 -c configs/dev.yaml
 #
 # WARNING: a stub caches ONE video's detections. Switching input video while these are
 # on produces confident nonsense — detections from the previous clip mapped onto the
-# new one. Change input? Either pass --no-stubs once to regenerate, or use the default
-# config. This is why the shipped default has them off.
-
-pipeline:
-  per_frame_keypoints: true
-  use_bytetrack: true
-  shot_classification: true
-  use_homography: true
-  use_tracknet: true
-  use_pose_shots: true
+# new one. Change input? Pass --no-stubs once to regenerate, or use the default config.
+# This is why the shipped default has them off.
 
 stubs:
   use_player_stubs: true
