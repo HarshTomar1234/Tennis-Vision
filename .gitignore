@@ -90,3 +90,7 @@ models/*.txt
 
 # Both spellings of the eval-clip directory (the typo'd one predates the rename).
 datasets/eval_clips/
+
+# Pipeline output and scratch analysis — generated, not source.
+output_videos/
+analysis/
