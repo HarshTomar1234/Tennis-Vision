@@ -70,6 +70,31 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _lowest_ball_point_near(
+    ball_detections: list, frame: int, window: int = 4
+) -> tuple[float, float] | None:
+    """
+    Ball centre at its lowest point on screen within ±`window` frames of `frame`.
+
+    In image coordinates y grows downward, so the largest y is the ball nearest the
+    court surface — the instant of the bounce. Bounce candidates are accurate to a few
+    frames, and using a frame where the ball is still airborne sends its floor
+    projection far down-court, because the camera ray through a raised ball meets the
+    ground well beyond the true landing point.
+
+    Returns None when no ball is detected anywhere in the window.
+    """
+    best: tuple[float, float] | None = None
+    for f in range(max(0, frame - window), min(len(ball_detections), frame + window + 1)):
+        bbox = ball_detections[f].get(1)
+        if bbox is None:
+            continue
+        centre = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+        if best is None or centre[1] > best[1]:
+            best = centre
+    return best
+
+
 def _positive_int(value: str) -> int:
     n = int(value)
     if n < 0:
@@ -775,11 +800,18 @@ def main():
                 continue
 
             if frame in bounce_set:
-                # A bounce is on the floor: the ball's own projection is valid.
-                bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
-                if bbox is None:
+                # A bounce is on the floor, so the ball's own projection is valid there
+                # — but ONLY at the instant it actually touches. The candidate frame is
+                # accurate to a few frames, and a ball caught still descending is metres
+                # in the air, which the floor homography throws far down-court. Measured:
+                # a serve landing projected to y = -36 m (court is 23.7 m long), which
+                # produced a 366 km/h reading.
+                #
+                # The touch instant is where the ball is LOWEST on screen (max image y),
+                # so search a small window for it rather than trusting the candidate.
+                point = _lowest_ball_point_near(ball_detections, frame, window=4)
+                if point is None:
                     continue
-                point = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
             else:
                 # A contact is airborne: use the hitting player's feet instead.
                 players = player_detections[frame] if frame < len(player_detections) else {}
@@ -796,9 +828,18 @@ def main():
             mx, my = mini_court.apply_homography(H, point)
             x_m = (mx - origin_x) * px_to_m_scale
             y_m = (my - origin_y) * px_to_m_scale
+            kind = "bounce" if frame in bounce_set else "contact"
             if (-out_margin_m <= x_m <= court_width_m + out_margin_m
                     and -out_margin_m <= y_m <= court_length_m + out_margin_m):
                 ball_positions_m[frame] = (x_m, y_m)
+                logger.debug(f"    f{frame:<5} {kind:<7} court=({x_m:6.1f}, {y_m:6.1f}) m")
+            else:
+                # Logged rather than dropped in silence: an event landing in the stands
+                # is the signature of a misclassified event, and knowing WHICH events
+                # fail is how the underlying detector gets fixed.
+                logger.debug(f"    f{frame:<5} {kind:<7} court=({x_m:6.1f}, {y_m:6.1f}) m "
+                             f"REJECTED — outside court +{out_margin_m:.0f} m "
+                             f"(court is {court_width_m:.1f} x {court_length_m:.1f} m)")
 
         shot_type_by_frame = {f: info.get("shot_type") for f, info in shot_classifications.items()}
         trajectories_3d = reconstruct_rally(
