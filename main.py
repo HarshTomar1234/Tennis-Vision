@@ -51,6 +51,7 @@ from utils.bounce_candidates import detect_bounce_candidates
 from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
+from utils.shot_physics import classify_from_physics, is_lob
 from utils.trajectory_3d import reconstruct_rally
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
@@ -463,6 +464,9 @@ def main():
         layout_params=layout_manager.get_mini_court_params(),
     )
     stats_params = layout_manager.get_stats_panel_params()
+    # Metres per mini-court pixel. Defined here, next to the court it describes, because
+    # everything downstream that speaks in real-world units depends on it.
+    px_to_m_scale = constants.DOUBLE_LINE_WIDTH / mini_court.get_width_of_mini_court()
     logger.info(f"  Mini-court position: start=({mini_court.start_x}, {mini_court.start_y}) "
                 f"size={mini_court.mini_court_width}×{mini_court.mini_court_height}px")
 
@@ -580,6 +584,69 @@ def main():
             player_mini_court, ball_mini_court, ball_shot_frames,
             mini_court.court_drawing_height, serve_frames=serve_frames,
         )
+
+        # Replace the position-guessed Volley/Smash labels with physically evidenced
+        # ones where the evidence exists. ShotClassifier decides those two from court
+        # position alone, which has never had ground truth and produced smashes in the
+        # middle of baseline rallies. See utils/shot_physics.py.
+        kp_sp = mini_court.get_court_drawing_keypoints()
+        net_y_px = (kp_sp[1] + kp_sp[5]) / 2.0
+        half_court_m = abs(kp_sp[5] - net_y_px) * px_to_m_scale
+        bounce_lookup = sorted(bounce_frames)
+        physics_calls: dict[int, list[str]] = {}
+
+        for frame in sorted(shot_classifications):
+            if frame in serve_frames:
+                continue   # already evidenced by the serve detector
+
+            players_here = player_detections[frame] if frame < len(player_detections) else {}
+            ball_bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
+            hitter_id = shot_classifications[frame].get("player_id")
+            hitter_box = players_here.get(hitter_id)
+            if ball_bbox is None or hitter_box is None:
+                continue
+
+            above_head = ((ball_bbox[1] + ball_bbox[3]) / 2.0) < hitter_box[1]
+            hitter_mini = player_mini_court.get(frame, {}).get(hitter_id)
+            if hitter_mini is None:
+                continue
+            distance_from_net_m = abs(hitter_mini[1] - net_y_px) * px_to_m_scale
+
+            # Bounces strictly between the previous contact and this one. Zero means
+            # the ball was struck before it bounced — the definition of a volley.
+            previous = [f for f in ball_shot_frames if f < frame]
+            bounces_between = (
+                sum(1 for b in bounce_lookup if previous[-1] < b < frame)
+                if previous else None
+            )
+
+            # Lob needs the 3-D apex, which is reconstructed later in the pipeline;
+            # it is applied in a second pass once trajectories exist.
+            call = classify_from_physics(
+                ball_above_head=above_head,
+                distance_from_net_m=distance_from_net_m,
+                half_court_length_m=half_court_m,
+                bounces_since_previous_contact=bounces_between,
+                outgoing_apex_m=None,
+            )
+            if call:
+                shot_classifications[frame]["shot_type"] = call.shot_type
+                physics_calls[frame] = call.reasons
+
+        # Any Volley/Smash that survives without physical evidence was a position
+        # guess. Downgrade it rather than ship a label nothing supports.
+        downgraded = 0
+        for frame, info in shot_classifications.items():
+            if info.get("shot_type") in ("Volley", "Smash") and frame not in physics_calls:
+                info["shot_type"] = "Groundstroke"
+                downgraded += 1
+
+        if physics_calls or downgraded:
+            logger.info(f"  Physics shot evidence: {len(physics_calls)} shot(s) evidenced"
+                        f"{', ' + str(downgraded) + ' unevidenced Volley/Smash downgraded' if downgraded else ''}")
+            for frame, reasons in sorted(physics_calls.items()):
+                logger.debug(f"    f{frame} {shot_classifications[frame]['shot_type']}: "
+                             f"{'; '.join(reasons)}")
         # Upgrade forehand/backhand from real body geometry where pose is available.
         # Serve, Volley and Smash keep their existing rules — those are genuine physical
         # signatures (overhead reach, net proximity). Forehand vs backhand was the one
@@ -652,7 +719,6 @@ def main():
         "player_2_last_player_speed": 0,
     }]
 
-    px_to_m_scale = constants.DOUBLE_LINE_WIDTH / mini_court.get_width_of_mini_court()
 
     for idx in range(len(ball_shot_frames) - 1):
         start_frame = ball_shot_frames[idx]
@@ -907,6 +973,23 @@ def main():
         # Same refuse-don't-guess rule as serve speed: a reconstruction on an invalid
         # court fit would be confidently wrong, so none is attempted.
         logger.info("  3-D reconstruction: skipped (court fit failed validation)")
+
+    # Lob is the one physical shot test that needs the 3-D apex, so it runs here rather
+    # than with the others. Only gated segments reach this point: an over-long segment
+    # reports an inflated apex and is rejected upstream, which is exactly what would
+    # otherwise turn an ordinary rally ball into a "lob".
+    lobs = 0
+    for trajectory in trajectories_3d:
+        info = shot_classifications.get(trajectory.start_frame)
+        if info is None or info.get("shot_type") in ("Serve", "Smash", "Volley"):
+            continue
+        call = is_lob(trajectory.apex_height_m)
+        if call:
+            info["shot_type"] = call.shot_type
+            lobs += 1
+            logger.debug(f"    f{trajectory.start_frame} Lob: {'; '.join(call.reasons)}")
+    if lobs:
+        logger.info(f"  Lob detection: {lobs} shot(s) identified by flight apex")
     else:
         logger.info("  3-D reconstruction: no reconstructable flight segments")
 
