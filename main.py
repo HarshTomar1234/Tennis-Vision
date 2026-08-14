@@ -50,6 +50,7 @@ from utils import (
 from utils.bounce_candidates import detect_bounce_candidates
 from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
+from utils.serve_landing import find_serve_landing
 from utils.trajectory_3d import reconstruct_rally
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
@@ -731,31 +732,71 @@ def main():
     # Serve speed, measured from floor-anchored geometry only (server's feet at
     # contact, ball's first bounce) — the one speed in this pipeline that never
     # touches an airborne ball's floor projection. See utils/serve_speed.py.
+    # The landing is found by the serve's own physics rather than taken from the
+    # generic bounce detector, which lands a few frames late on serves — and a few
+    # frames is decisive. Measured: the generic candidate sat after the ball had
+    # already bounced and risen, projecting to -31 m on a 23.7 m court and yielding
+    # 366 km/h. See utils/serve_landing.py.
     serve_speed = 0.0
     serve_reject = ""
-    serve_pair = find_serve_and_bounce(shot_classifications, bounce_frames, fps)
-    if serve_pair:
-        contact_frame, bounce_frame = serve_pair
-        server_id = shot_classifications[contact_frame].get("player_id")
-        contact_pos = player_mini_court.get(contact_frame, {}).get(server_id)
-        bounce_pos  = ball_mini_court.get(bounce_frame, {}).get(1)
+    serve_contact = None
+    serve_landing = None
+    serve_frames_found = [f for f, info in shot_classifications.items()
+                          if str(info.get("shot_type", "")).lower() == "serve"]
+    if serve_frames_found and court_valid:
+        serve_contact = min(serve_frames_found)
+        server_id = shot_classifications[serve_contact].get("player_id")
+        contact_pos = player_mini_court.get(serve_contact, {}).get(server_id)
 
         kp_mc = mini_court.get_court_drawing_keypoints()
-        net_y = (kp_mc[1] + kp_mc[5]) / 2.0
-        if bounce_is_in_service_box(contact_pos, bounce_pos, net_y,
-                                    far_service_y=kp_mc[17], near_service_y=kp_mc[21]):
-            serve_speed = serve_speed_kmh(
-                contact_pos, bounce_pos,
-                contact_frame, bounce_frame, px_to_m_scale, fps,
-                max_realistic_kmh=constants.MAX_REALISTIC_BALL_SPEED_KMH,
+        origin_x, origin_y = kp_mc[0], kp_mc[1]
+        _h_cache_sl: dict = {}
+
+        def _project(frame: int, image_point):
+            kp = (all_court_keypoints[min(frame, len(all_court_keypoints) - 1)]
+                  if cfg["pipeline"]["per_frame_keypoints"] else court_keypoints)
+            key = tuple(kp)
+            if key not in _h_cache_sl:
+                _h_cache_sl[key] = mini_court.compute_homography(kp)
+            H = _h_cache_sl[key]
+            if H is None:
+                return None
+            mx, my = mini_court.apply_homography(H, image_point)
+            return ((mx - origin_x) * px_to_m_scale, (my - origin_y) * px_to_m_scale)
+
+        if contact_pos is not None:
+            server_y_m = (contact_pos[1] - origin_y) * px_to_m_scale
+            found = find_serve_landing(
+                serve_contact, ball_detections, _project,
+                server_y_m=server_y_m,
+                net_y_m=((kp_mc[1] + kp_mc[5]) / 2.0 - origin_y) * px_to_m_scale,
+                service_line_far_m=(kp_mc[17] - origin_y) * px_to_m_scale,
+                service_line_near_m=(kp_mc[21] - origin_y) * px_to_m_scale,
+                fps=fps,
             )
+            if found is None:
+                serve_reject = " (landing never observed inside the service box)"
+            else:
+                landing_frame, landing_court = found
+                serve_landing = landing_frame
+                contact_court = ((contact_pos[0] - origin_x) * px_to_m_scale,
+                                 server_y_m)
+                serve_speed = serve_speed_kmh(
+                    contact_court, landing_court, serve_contact, landing_frame,
+                    px_to_m_scale=1.0,   # positions are already metres
+                    fps=fps,
+                    max_realistic_kmh=constants.MAX_REALISTIC_BALL_SPEED_KMH,
+                )
         else:
-            serve_reject = " (landing not in the service box — bounce misclassified)"
+            serve_reject = " (no court position for the server at contact)"
+    elif serve_frames_found and not court_valid:
+        serve_reject = " (court fit failed validation)"
+
     if serve_speed > 0:
         logger.info(f"  Serve: {serve_speed:.1f} km/h (average over flight, "
-                    f"contact f{serve_pair[0]} → bounce f{serve_pair[1]})")
+                    f"contact f{serve_contact} → landing f{serve_landing})")
     else:
-        logger.info(f"  Serve: not measurable{serve_reject or ' (no serve/bounce pair with valid positions)'}")
+        logger.info(f"  Serve: not measurable{serve_reject or ' (no serve detected)'}")
 
     # ── 3-D trajectory reconstruction ──────────────────────────────
     # This is the fix for rally speeds, not a visualisation extra: speeds derived from
