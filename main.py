@@ -53,6 +53,7 @@ from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
 from utils.trajectory_3d import reconstruct_rally
+from utils.viewer_3d import build_viewer
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
 
@@ -990,6 +991,20 @@ def main():
             logger.debug(f"    f{trajectory.start_frame} Lob: {'; '.join(call.reasons)}")
     if lobs:
         logger.info(f"  Lob detection: {lobs} shot(s) identified by flight apex")
+
+    # Interactive 3-D viewer. Written next to the output video so the page can
+    # reference it by relative path; the two files travel together.
+    if trajectories_3d:
+        output_video_path = Path(cfg["io"]["output_video"])
+        viewer_path = build_viewer(
+            trajectories_3d,
+            output_video_path.with_suffix(".html"),
+            fps=fps,
+            video_path=output_video_path.name,
+            shot_types={f: i.get("shot_type") for f, i in shot_classifications.items()},
+            court_valid=court_valid,
+        )
+        logger.info(f"3-D viewer  → {viewer_path}  (open in any browser)")
     else:
         logger.info("  3-D reconstruction: no reconstructable flight segments")
 
