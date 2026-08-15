@@ -72,7 +72,7 @@ Tennis-Vision/
 │                              #   small and committed)
 ├── notes/                    # CV concept write-ups (homography, Kalman filtering, SORT,
 │                              #   DeepSORT re-ID, temporal smoothing, shot detection)
-├── tests/                    # pytest unit tests (76 passing - see Measured Results)
+├── tests/                    # pytest unit + integration tests (146 passing)
 ├── tools/                    # label_shots.py - keyboard-driven contact/bounce labeling tool
 ├── trackers/                 # tracknet_ball_tracker.py (production), player_tracker.py,
 │                              #   ball_tracker.py (legacy YOLO ball tracker, superseded)
@@ -182,7 +182,7 @@ unavailable or ambiguous - reported, not hidden).
 
 ### Test suite
 
-83 unit + integration tests passing (`pytest tests/`), covering ball-state
+146 unit + integration tests passing (`pytest tests/`), covering ball-state
 classification, Kalman smoothing (including the physical speed-plausibility gate),
 mini-court coordinate mapping, trajectory drawing, pose-based shot classification, and
 the hit/bounce classifier. The end-to-end smoke test runs genuine fresh detection -
