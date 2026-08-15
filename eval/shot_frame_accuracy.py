@@ -109,12 +109,29 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
     print(f"False pos.  : {false_pos}")
     print(f"Mean offset : {mae:.1f} frames")
 
-    if mae <= 5:
-        verdict = "EXCELLENT (≤5 frames)"
-    elif mae <= 15:
-        verdict = "ACCEPTABLE (≤15 frames)"
+    # The verdict must account for recall and false positives, not only the timing of
+    # whichever shots happened to match. It previously used `mae` alone, which made it
+    # structurally incapable of failing: a run that matched 1 of 7 shots with 3 false
+    # positives still printed "EXCELLENT", because the one match was well timed. That
+    # word was quoted verbatim in the README as a measured result.
+    recall = len(matched) / len(gt_frames) if gt_frames else 0.0
+    precision = len(matched) / len(detected) if detected else 0.0
+    f1 = (2 * recall * precision / (recall + precision)) if (recall + precision) else 0.0
+
+    print(f"Recall      : {recall:.1%}")
+    print(f"Precision   : {precision:.1%}")
+    print(f"F1          : {f1:.3f}")
+
+    if f1 >= 0.9 and mae <= 5:
+        verdict = f"EXCELLENT (F1 {f1:.2f}, mean offset {mae:.1f} frames)"
+    elif f1 >= 0.75 and mae <= 15:
+        verdict = f"ACCEPTABLE (F1 {f1:.2f}, mean offset {mae:.1f} frames)"
+    elif f1 < 0.75:
+        verdict = (f"POOR - F1 {f1:.2f}: {len(missed)} shot(s) missed, "
+                   f"{false_pos} false positive(s). Timing of matched shots is not "
+                   f"the problem here.")
     else:
-        verdict = "POOR (>15 frames) - ball detection needs improvement"
+        verdict = f"POOR - mean offset {mae:.1f} frames is too large"
 
     print(f"VERDICT     : {verdict}")
 

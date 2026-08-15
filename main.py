@@ -711,14 +711,22 @@ def main():
     logger.info("  Computing player statistics...")
     det_cfg = cfg.get("detection", {})
 
+    # Each running total carries its OWN sample counter. Averaging a total by an
+    # unrelated count was producing two wrong numbers at once: player movement accrued
+    # on the opponent's shots but was divided by this player's shot count, and shot
+    # speed was divided by every shot including those whose speed was rejected as
+    # physically implausible. Measured on one run: P1 movement published 9.1 km/h where
+    # its own samples give 7.6, P2 published 5.6 where its samples give 6.7.
     player_stats_data: list[dict] = [{
         "frame_num": 0,
         "player_1_number_of_shots": 0, "player_1_total_shot_speed": 0,
+        "player_1_shot_speed_samples": 0,
         "player_1_last_shot_speed": 0,  "player_1_total_player_speed": 0,
-        "player_1_last_player_speed": 0,
+        "player_1_player_speed_samples": 0, "player_1_last_player_speed": 0,
         "player_2_number_of_shots": 0, "player_2_total_shot_speed": 0,
+        "player_2_shot_speed_samples": 0,
         "player_2_last_shot_speed": 0,  "player_2_total_player_speed": 0,
-        "player_2_last_player_speed": 0,
+        "player_2_player_speed_samples": 0, "player_2_last_player_speed": 0,
     }]
 
 
@@ -772,8 +780,10 @@ def main():
             # let a bad reading corrupt the running average; last_shot_speed keeps
             # its previous value instead of showing a fabricated number.
             row[f"player_{shooter_id}_total_shot_speed"]  += ball_speed_kmh
+            row[f"player_{shooter_id}_shot_speed_samples"] += 1
             row[f"player_{shooter_id}_last_shot_speed"]    = ball_speed_kmh
         row[f"player_{opponent_id}_total_player_speed"] += opp_speed_kmh
+        row[f"player_{opponent_id}_player_speed_samples"] += 1
         row[f"player_{opponent_id}_last_player_speed"]  = opp_speed_kmh
 
         if cfg["pipeline"]["shot_classification"] and start_frame in shot_classifications:
@@ -788,9 +798,10 @@ def main():
                          on="frame_num", how="left").ffill()
 
     for pid in (1, 2):
-        n = stats_df[f"player_{pid}_number_of_shots"].replace(0, 1)
-        stats_df[f"player_{pid}_average_shot_speed"]   = stats_df[f"player_{pid}_total_shot_speed"] / n
-        stats_df[f"player_{pid}_average_player_speed"] = stats_df[f"player_{pid}_total_player_speed"] / n
+        shot_n = stats_df[f"player_{pid}_shot_speed_samples"].replace(0, 1)
+        move_n = stats_df[f"player_{pid}_player_speed_samples"].replace(0, 1)
+        stats_df[f"player_{pid}_average_shot_speed"]   = stats_df[f"player_{pid}_total_shot_speed"] / shot_n
+        stats_df[f"player_{pid}_average_player_speed"] = stats_df[f"player_{pid}_total_player_speed"] / move_n
 
     logger.info(f"  P1: {int(stats_df['player_1_number_of_shots'].iloc[-1])} shots, "
                 f"avg {stats_df['player_1_average_shot_speed'].iloc[-1]:.1f} km/h")
@@ -959,7 +970,11 @@ def main():
         # both ends therefore proves an event was missed between them, and its
         # feet-to-feet "flight" (the distance one player shuffled) is not a ball
         # trajectory. Seen live: serve→re-serve read 17 km/h over 1.24 s.
-        net_y_court_m = ((kp_sp[1] + kp_sp[5]) / 2.0 - origin_y) * px_to_m_scale
+        # Read from the mini-court directly rather than a variable defined inside the
+        # shot-classification branch: with shot_classification disabled (a shipped
+        # config option) that variable never exists, and the pipeline crashed here
+        # AFTER completing and logging every stat, before writing any output.
+        net_y_court_m = ((court_kp_draw[1] + court_kp_draw[5]) / 2.0 - origin_y) * px_to_m_scale
         kept = []
         for t in trajectories_3d:
             # A bounce-to-bounce span has no racket contact at either end, so no shot
@@ -1100,12 +1115,12 @@ def main():
     output_path = cfg["io"]["output_video"]
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    if save_video(output_frames, output_path):
+    if save_video(output_frames, output_path, fps=fps):
         logger.info(f"Output video → {output_path}")
     else:
         alt = output_path.replace(".avi", "_fallback.mp4")
         logger.warning(f"AVI save failed - retrying as {alt}...")
-        if save_video(output_frames, alt):
+        if save_video(output_frames, alt, fps=fps):
             logger.info(f"Output video → {alt}")
         else:
             logger.error("All video save attempts failed")

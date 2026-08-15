@@ -12,19 +12,25 @@ def read_video(video_path):
     cap.release()
     return frames
 
-def save_video(output_video_frames, output_video_path):
+def save_video(output_video_frames, output_video_path, fps=24.0):
+    """
+    Write annotated frames to disk.
 
+    `fps` must be the SOURCE video's frame rate. It was hardcoded to 24, so a 30 fps
+    clip was written 25% slow: the demo video played in mild slow motion, and its clock
+    drifted against the 3-D viewer's timeline, which uses the real rate. Every rendered
+    output shared that error.
+    """
     output_dir = os.path.dirname(output_video_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
-    
+
     height, width = output_video_frames[0].shape[:2]
-    
-  
+
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    
-    out = cv2.VideoWriter(output_video_path, fourcc, 24, (width, height))
+
+    out = cv2.VideoWriter(output_video_path, fourcc, float(fps) if fps and fps > 0 else 24.0,
+                          (width, height))
     
     
     if not out.isOpened():
