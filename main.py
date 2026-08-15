@@ -52,8 +52,9 @@ from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
-from utils.trajectory_3d import reconstruct_rally
+from utils.trajectory_3d import crosses_net, reconstruct_rally
 from utils.viewer_3d import build_viewer
+from utils.web_video import to_browser_playable
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
 
@@ -958,11 +959,26 @@ def main():
         # both ends therefore proves an event was missed between them, and its
         # feet-to-feet "flight" (the distance one player shuffled) is not a ball
         # trajectory. Seen live: serve→re-serve read 17 km/h over 1.24 s.
-        trajectories_3d = [
-            t for t in trajectories_3d
-            if not (t.start_frame in hitter_by_frame and t.end_frame in hitter_by_frame
-                    and hitter_by_frame[t.start_frame] == hitter_by_frame[t.end_frame])
-        ]
+        net_y_court_m = ((kp_sp[1] + kp_sp[5]) / 2.0 - origin_y) * px_to_m_scale
+        kept = []
+        for t in trajectories_3d:
+            both_contacts = (t.start_frame in hitter_by_frame
+                             and t.end_frame in hitter_by_frame)
+            if both_contacts:
+                if hitter_by_frame[t.start_frame] == hitter_by_frame[t.end_frame]:
+                    logger.debug(f"    reject f{t.start_frame}->f{t.end_frame}: "
+                                 f"same player at both ends (missed event between)")
+                    continue
+                # Different players stand on opposite sides, so their shots must be
+                # separated by a net crossing. One that is not proves the opponent's
+                # shot went undetected and two same-side events were joined.
+                if not crosses_net(t.start[:2], t.end[:2], net_y_court_m):
+                    logger.debug(f"    reject f{t.start_frame}->f{t.end_frame}: "
+                                 f"two different players' contacts that never cross "
+                                 f"the net ({t.speed_kmh:.0f} km/h)")
+                    continue
+            kept.append(t)
+        trajectories_3d = kept
 
     if trajectories_3d:
         speeds_3d = [t.speed_kmh for t in trajectories_3d]
@@ -994,17 +1010,11 @@ def main():
 
     # Interactive 3-D viewer. Written next to the output video so the page can
     # reference it by relative path; the two files travel together.
+    viewer_spec = None
     if trajectories_3d:
-        output_video_path = Path(cfg["io"]["output_video"])
-        viewer_path = build_viewer(
-            trajectories_3d,
-            output_video_path.with_suffix(".html"),
-            fps=fps,
-            video_path=output_video_path.name,
-            shot_types={f: i.get("shot_type") for f, i in shot_classifications.items()},
-            court_valid=court_valid,
-        )
-        logger.info(f"3-D viewer  → {viewer_path}  (open in any browser)")
+        viewer_spec = (trajectories_3d,
+                       {f: i.get("shot_type") for f, i in shot_classifications.items()},
+                       court_valid)
     else:
         logger.info("  3-D reconstruction: no reconstructable flight segments")
 
@@ -1090,6 +1100,26 @@ def main():
             logger.info(f"Output video → {alt}")
         else:
             logger.error("All video save attempts failed")
+
+    if viewer_spec is not None:
+        # Built after the video so it can reference a browser-playable copy. The
+        # pipeline writes AVI/MPEG-4 Part 2, which OpenCV produces reliably but no
+        # browser can play — the viewer's video tab was silently blank because a
+        # <video> element with an unsupported source just shows nothing.
+        trajectories, shot_labels, fit_ok = viewer_spec
+        web_video = to_browser_playable(output_path)
+        if web_video is None:
+            logger.warning("  Viewer video tab will be empty: no browser-playable copy "
+                           "could be produced (is ffmpeg installed?)")
+        viewer_path = build_viewer(
+            trajectories,
+            Path(output_path).with_suffix(".html"),
+            fps=fps,
+            video_path=web_video.name if web_video else None,
+            shot_types=shot_labels,
+            court_valid=fit_ok,
+        )
+        logger.info(f"3-D viewer  → {viewer_path}  (open in any browser)")
 
     logger.info("=" * 60)
     logger.info("Pipeline complete.")

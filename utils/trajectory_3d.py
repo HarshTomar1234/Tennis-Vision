@@ -186,6 +186,28 @@ def reconstruct_segment(
     )
 
 
+def crosses_net(start_xy_m, end_xy_m, net_y_m: float) -> bool:
+    """
+    Whether a flight passes from one side of the net to the other.
+
+    Two contacts made by different players MUST cross the net, because the players
+    stand on opposite sides. A segment joining them that stays on one side therefore
+    proves an event between them was missed — the opponent's shot went undetected and
+    two same-side events were joined into a flight that never happened.
+
+    Measured on input_video_2: 7 of 16 reconstructed segments never crossed the net,
+    and they clustered at 28-45 km/h while genuine crossing flights ran 65-112 km/h.
+    That bimodal split is the signature of stitched-together non-flights.
+
+    Not every same-side segment is wrong: a ball that bounces on the receiver's side
+    and is then struck by the receiver legitimately stays on one side, as does a ball
+    hit into the net. So this is applied only where the physics is unambiguous.
+    """
+    if start_xy_m is None or end_xy_m is None:
+        return False
+    return (start_xy_m[1] - net_y_m) * (end_xy_m[1] - net_y_m) < 0
+
+
 def reconstruct_rally(
     event_frames: list[int],
     ball_positions_m: dict[int, tuple[float, float]],
