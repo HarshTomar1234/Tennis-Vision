@@ -8,7 +8,7 @@ Why this module exists
 The court keypoint model is a plain regression head: given any image it returns 14
 points, and it has no way to signal "this camera angle is outside my training
 distribution". On footage it was not trained for it returns points that still form a
-tidy quadrilateral — just not one lying on the actual court. Everything downstream
+tidy quadrilateral - just not one lying on the actual court. Everything downstream
 (homography, real-world speeds, mini-court positions) is then computed from that
 wrong quadrilateral and reported with full confidence.
 
@@ -20,7 +20,7 @@ What does NOT work (measured, not assumed)
 ------------------------------------------
 Homography reprojection error is useless here. Measured across 9 clips it ranged
 1.40–1.88 px on correct fits and 2.13 px on a visibly wrong one, with 14/14 RANSAC
-inliers in every case. It measures whether the 14 points are *self-consistent* — and
+inliers in every case. It measures whether the 14 points are *self-consistent* - and
 a tidy quadrilateral on the stands is perfectly self-consistent. See
 `eval/court_validity_calibration.py` for the full table.
 
@@ -37,7 +37,7 @@ Calibrated on the 9-clip eval suite against by-eye verification of each court fi
     verified wrong fits   : 0.053, 0.067, 0.080, 0.187   (clips 11, 6, 5, 10)
 
 MIN_LINE_SUPPORT sits in that gap. It is a small sample and the threshold should be
-re-checked whenever the clip suite grows — it is a calibrated heuristic, not a
+re-checked whenever the clip suite grows - it is a calibrated heuristic, not a
 proof of correctness.
 """
 from __future__ import annotations

@@ -9,7 +9,7 @@ Run:
   pytest tests/ -v                  # verbose
 
 Markers:
-  slow  — tests that load video / run YOLO (require model files + stubs)
+  slow  - tests that load video / run YOLO (require model files + stubs)
 """
 import os
 import sys
@@ -95,11 +95,11 @@ class TestShotClassifier:
         assert result != "Volley"
 
     def test_shot_color_title_case(self):
-        """All legend lookups use Title Case — must return non-white."""
+        """All legend lookups use Title Case - must return non-white."""
         white = (255, 255, 255)
         for shot_type in ("Serve", "Forehand", "Backhand", "Volley", "Smash"):
             color = self.clf.get_shot_color(shot_type)
-            assert color != white, f"get_shot_color('{shot_type}') returned white — key mismatch"
+            assert color != white, f"get_shot_color('{shot_type}') returned white - key mismatch"
 
     def test_shot_color_case_insensitive(self):
         """Lowercase lookup must also work (regression guard)."""
@@ -115,7 +115,7 @@ class TestShotClassifier:
             i=1, player_id=1, player_y=300,
             ball_trajectory_y=10, mini_court_height=400, is_first_shot=False
         )
-        assert result == "Volley", "This test documents the old bug — should still fire with threshold=150"
+        assert result == "Volley", "This test documents the old bug - should still fire with threshold=150"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ class TestStatsSave:
 
 
 # ─────────────────────────────────────────────────────────────────
-# Integration test (requires model files + stubs — mark as slow)
+# Integration test (requires model files + stubs - mark as slow)
 # ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.slow
@@ -219,7 +219,7 @@ def test_full_pipeline_smoke(tmp_path):
     Deliberately does NOT rely on cached detection stubs. Stubs are gitignored (they
     are per-video caches, and shipping one makes a newcomer analyse their clip with
     another clip's detections), so a test that needed them would pass only on a
-    machine that had already run the pipeline — exactly the machine where a break is
+    machine that had already run the pipeline - exactly the machine where a break is
     least likely to be noticed. --max-frames keeps a fresh-detection run fast enough
     to stay a smoke test.
 

@@ -1,7 +1,7 @@
 {
   "_comment": [
     "Evaluation clip suite. The clips themselves are third-party broadcast footage and",
-    "are NOT redistributed through this repo — this manifest plus scripts/build_clip_suite.py",
+    "are NOT redistributed through this repo - this manifest plus scripts/build_clip_suite.py",
     "let anyone rebuild the identical suite and reproduce every per-surface number.",
     "",
     "15 clips per surface, spread across matches, players and camera situations. Sources",

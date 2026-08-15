@@ -114,7 +114,7 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
     elif mae <= 15:
         verdict = "ACCEPTABLE (≤15 frames)"
     else:
-        verdict = "POOR (>15 frames) — ball detection needs improvement"
+        verdict = "POOR (>15 frames) - ball detection needs improvement"
 
     print(f"VERDICT     : {verdict}")
 

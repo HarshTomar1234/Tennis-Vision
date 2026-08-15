@@ -42,7 +42,7 @@ class ShotClassifier:
             ball_shot_frames: List of frame numbers where shots occur
             mini_court_height: Height of the mini court for relative positioning
             serve_frames: Frames carrying physical serve evidence (see
-                utils/serve_detector.py). When omitted, no shot is labelled a serve —
+                utils/serve_detector.py). When omitted, no shot is labelled a serve -
                 deliberately, because the alternative was labelling whichever shot
                 came first, which is wrong on any clip that starts mid-point.
 
@@ -123,7 +123,7 @@ class ShotClassifier:
         # `is_first_shot` now means "carries serve evidence" (ball struck above the
         # player's head, from a baseline) rather than "happens to be first in the
         # clip". The old positional rule labelled a mid-rally groundstroke a serve
-        # whenever a clip started mid-point, which is most of the time — see
+        # whenever a clip started mid-point, which is most of the time - see
         # utils/serve_detector.py.
         if is_first_shot:
             return self.SHOT_TYPES['SERVE']
@@ -273,7 +273,7 @@ def draw_shot_classifications(frames, shot_classifications, ball_shot_frames,
         
         # Add a legend for shot types at the bottom right 
         # CAMERA-ROBUST: Position to avoid overlapping with mini court and show all items
-        # Size the panel to its own title rather than a guessed constant — at 150px
+        # Size the panel to its own title rather than a guessed constant - at 150px
         # the title overflowed the box and was clipped by the frame edge.
         legend_title = "SHOT TYPE LEGEND"
         (title_w, _), _ = cv2.getTextSize(legend_title, font, 0.65, thickness)

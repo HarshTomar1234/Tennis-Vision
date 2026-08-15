@@ -3,7 +3,7 @@ eval/retest_union_candidates_full_pipeline.py
 ────────────────────────────────────────────────
 Decisive test for the union candidate generator (journal 0015): does combining
 y-reversal + x-velocity candidates, then filtering through the trained hit/bounce
-classifier, actually improve real recall/precision — not just raw candidate recall,
+classifier, actually improve real recall/precision - not just raw candidate recall,
 which was already shown to not be the whole story (journal 0014's coincidental count
 match).
 """

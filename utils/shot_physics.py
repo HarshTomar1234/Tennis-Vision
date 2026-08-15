@@ -7,7 +7,7 @@ Why this exists
 ---------------
 `ShotClassifier` decides Volley and Smash from court position alone: a player near the
 net is volleying, a ball high in the mini-court is a smash. Both are guesses dressed as
-measurements — they have never had ground truth, and on real clips they produced six
+measurements - they have never had ground truth, and on real clips they produced six
 backhands out of eight shots and smashes in the middle of baseline rallies.
 
 Three of these shots are, however, *physically* defined, in the same way the serve
@@ -27,7 +27,7 @@ position, state the physical fact that distinguishes the shot and test it direct
 
   Lob    outgoing flight whose apex is far above net height. Apex comes from the 3-D
          reconstruction, so this is only claimed for segments that passed the physical
-         gates — an over-long segment inflates apex, which is precisely the artefact
+         gates - an over-long segment inflates apex, which is precisely the artefact
          those gates reject.
 
 Deliberately NOT included: the drop shot. It is defined by a low, short flight, and
@@ -36,7 +36,7 @@ serve speed is). Adding it now would be exactly the guess-dressed-as-measurement
 module exists to replace.
 
 Every result carries the evidence that produced it, so a consumer can show why a shot
-was called what it was — and so a wrong call is diagnosable instead of mysterious.
+was called what it was - and so a wrong call is diagnosable instead of mysterious.
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def is_smash(
         return None
     limit = SMASH_MAX_DISTANCE_FROM_NET_FRAC * half_court_length_m
     if distance_from_net_m > limit:
-        return None       # struck from the baseline — a serve, not a smash
+        return None       # struck from the baseline - a serve, not a smash
     return ShotCall("Smash", [
         "ball struck above the player's head",
         f"struck {distance_from_net_m:.1f} m from the net (inside {limit:.1f} m)",

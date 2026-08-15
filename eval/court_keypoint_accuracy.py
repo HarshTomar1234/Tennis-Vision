@@ -1,7 +1,7 @@
 """
 eval/court_keypoint_accuracy.py
 ───────────────────────────────
-First real measurement of court keypoint accuracy — the component the README has
+First real measurement of court keypoint accuracy - the component the README has
 always listed as "unmeasured".
 
 Measured against the held-out validation split of the TennisCourtDetector dataset
@@ -19,9 +19,9 @@ one video share a surface). Reported as colour families rather than surface name
 because a green hard court and a grass court are genuinely not separable by colour
 alone:
 
-    clay   orange/red hue          — unambiguous
-    green  grass OR green hard     — AMBIGUOUS, do not read as "grass"
-    blue   blue hard court         — unambiguous
+    clay   orange/red hue          - unambiguous
+    green  grass OR green hard     - AMBIGUOUS, do not read as "grass"
+    blue   blue hard court         - unambiguous
 
 Usage:
     python eval/court_keypoint_accuracy.py [--limit N] [--tolerance PX]
@@ -74,7 +74,7 @@ def classify_surface(image: np.ndarray, kps: np.ndarray) -> str:
     if hue < 25 or hue > 170:
         return "clay"
     if 35 <= hue <= 85:
-        return "green"          # grass OR green hard court — not separable here
+        return "green"          # grass OR green hard court - not separable here
     if 86 <= hue <= 135:
         return "blue"
     return "unknown"
@@ -91,7 +91,7 @@ def main() -> None:
 
     val_path = DATA_DIR / "data_val.json"
     if not val_path.exists():
-        sys.exit(f"Missing {val_path} — extract the dataset first.")
+        sys.exit(f"Missing {val_path} - extract the dataset first.")
 
     samples = json.load(open(val_path))
     if args.limit:
@@ -132,7 +132,7 @@ def main() -> None:
             print(f"  {n + 1}/{len(samples)} ...")
 
     if not all_errors:
-        sys.exit("No images could be read — check the extraction path.")
+        sys.exit("No images could be read - check the extraction path.")
 
     errs = np.array(all_errors)
     tol = args.tolerance

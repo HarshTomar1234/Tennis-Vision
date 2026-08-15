@@ -66,7 +66,7 @@ def test_handles_gaps_in_context_window():
     assert feats["height_y"] == 50.0
 
 
-# ── classify_hit_or_bounce — logistic math, isolated with a synthetic model ──
+# ── classify_hit_or_bounce - logistic math, isolated with a synthetic model ──
 
 def _write_synthetic_weights(tmpdir) -> str:
     """A hand-built model: only vx_change_mag matters, threshold ~ around 10."""
@@ -122,16 +122,16 @@ def test_returns_none_when_weights_file_missing():
     ) is None
 
 
-# ── classify_hit_or_bounce — sanity check against the real shipped model ─────
+# ── classify_hit_or_bounce - sanity check against the real shipped model ─────
 
 REAL_WEIGHTS = "models/hit_bounce_classifier.json"
 
 
 def test_real_model_classifies_unambiguous_hit():
-    """Large horizontal redirection, moderate height — matches the measured hit profile
+    """Large horizontal redirection, moderate height - matches the measured hit profile
     (mean |vx change| ~19px vs bounce's ~3px)."""
     if not os.path.exists(REAL_WEIGHTS):
-        return   # not trained in this environment — skip rather than fail the suite
+        return   # not trained in this environment - skip rather than fail the suite
     result = classify_hit_or_bounce(
         {"height_y": 250.0, "vy_change_mag": 20.0, "vx_change_mag": 40.0}
     )
@@ -140,7 +140,7 @@ def test_real_model_classifies_unambiguous_hit():
 
 
 def test_real_model_classifies_unambiguous_bounce():
-    """Near-zero horizontal velocity change — matches the measured bounce profile
+    """Near-zero horizontal velocity change - matches the measured bounce profile
     (mean |vx change| ~3px, std ~4px, i.e. almost always small)."""
     if not os.path.exists(REAL_WEIGHTS):
         return

@@ -1,7 +1,7 @@
 """
 trackers/tracknet_ball_tracker.py
 ──────────────────────────────────
-TrackNet v2 ball tracker — drop-in replacement for BallTracker.
+TrackNet v2 ball tracker - drop-in replacement for BallTracker.
 
 Architecture: yastrebksv/TrackNet (BallTrackerNet)
   VGG-style encoder + decoder, 9-channel input (3 consecutive RGB frames),
@@ -50,9 +50,9 @@ class ConvBlock(nn.Module):
 
 class BallTrackerNet(nn.Module):
     """
-    Input : (B, 9, H, W)  — 3 consecutive RGB frames stacked channel-wise
-    Output: (B, 256, H*W) — spatial activation map (testing=False)
-                          — softmax over 256 channels (testing=True)
+    Input : (B, 9, H, W)  - 3 consecutive RGB frames stacked channel-wise
+    Output: (B, 256, H*W) - spatial activation map (testing=False)
+                          - softmax over 256 channels (testing=True)
     Ball position = argmax(dim=1) → postprocess with HoughCircles.
     """
     def __init__(self, out_channels: int = 256):
@@ -165,7 +165,7 @@ class TrackNetBallTracker:
 
             if missing:
                 logger.warning(
-                    f"TrackNet: partial weight match — "
+                    f"TrackNet: partial weight match - "
                     f"{len(expected - missing)}/{len(expected)} keys loaded. "
                     f"First missing: {sorted(missing)[:3]}"
                 )
@@ -199,7 +199,7 @@ class TrackNetBallTracker:
         """
         ball_mask = model_out.reshape((self.INPUT_HEIGHT, self.INPUT_WIDTH)) != 0
         ys, xs = np.where(ball_mask)
-        if len(xs) < 5:   # too sparse — noise
+        if len(xs) < 5:   # too sparse - noise
             return None
         cx_in = xs.mean()
         cy_in = ys.mean()
@@ -218,7 +218,7 @@ class TrackNetBallTracker:
         Returns List[Dict] matching BallTracker format: {1: [x1,y1,x2,y2]}.
         """
         if self.model is None:
-            logger.warning("TrackNet model not loaded — returning empty detections")
+            logger.warning("TrackNet model not loaded - returning empty detections")
             return [{} for _ in frames]
 
         orig_h, orig_w = frames[0].shape[:2]
@@ -240,7 +240,7 @@ class TrackNetBallTracker:
                 if (i + 1) % 100 == 0:
                     det_so_far = sum(1 for d in detections if d.get(1))
                     logger.debug(
-                        f"  Frame {i+1}/{len(frames)} — "
+                        f"  Frame {i+1}/{len(frames)} - "
                         f"running detection rate: {100*det_so_far/(i+1):.1f}%"
                     )
 
@@ -254,7 +254,7 @@ class TrackNetBallTracker:
     def detect_frames_with_tracking(self, frames: list[np.ndarray],
                                      read_from_stub: bool = False,
                                      stub_path: str | None = None) -> list[dict]:
-        """TrackNet already uses temporal context — no separate tracker needed."""
+        """TrackNet already uses temporal context - no separate tracker needed."""
         return self.detect_frames(frames, read_from_stub, stub_path)
 
     def interpolate_ball_positions(
@@ -352,5 +352,5 @@ class TrackNetBallTracker:
 
     def filter_by_confidence(self, detections: list[dict],
                               threshold: float) -> list[dict]:
-        """Confidence is baked into detection — pass through unchanged."""
+        """Confidence is baked into detection - pass through unchanged."""
         return detections

@@ -4,19 +4,19 @@ eval/explore_hit_bounce_features.py
 Feature exploration for hit-vs-bounce classification, using the real 1,030-event
 TrackNet ground truth (see docs/journal/0010, 0011).
 
-Physical hypotheses to test before committing to any model (ladder-thinking — check
+Physical hypotheses to test before committing to any model (ladder-thinking - check
 what actually separates the classes before reaching for anything more than the simplest
 feature that works):
 
-  1. Height (already measured: hit mean 275px, bounce mean 315px — real but overlapping).
+  1. Height (already measured: hit mean 275px, bounce mean 315px - real but overlapping).
   2. Vertical velocity magnitude change at the event (both cause a y-reversal by
-     definition, so this may not discriminate much — testing anyway).
-  3. Horizontal (x) velocity change — a bounce is a court reflection, which mostly
+     definition, so this may not discriminate much - testing anyway).
+  3. Horizontal (x) velocity change - a bounce is a court reflection, which mostly
      preserves x-velocity (no strong sideways force from the ground). A hit is a player
-     redirecting the ball — can reverse or sharply change x-direction (cross-court shots,
+     redirecting the ball - can reverse or sharply change x-direction (cross-court shots,
      returns). If this holds, it should be a much stronger signal than height alone.
 
-Split by CLIP, not by event — events from the same clip share camera, lighting, and
+Split by CLIP, not by event - events from the same clip share camera, lighting, and
 players, so an event-level split would leak information and overstate accuracy.
 """
 import csv
@@ -114,7 +114,7 @@ def main():
     print(f"  hit:    {sum(flip_hit)}/{len(flip_hit)} = {100*sum(flip_hit)/len(flip_hit):.1f}% flipped direction")
     print(f"  bounce: {sum(flip_bounce)}/{len(flip_bounce)} = {100*sum(flip_bounce)/len(flip_bounce):.1f}% flipped direction")
 
-    # Save for the next step (classifier training) — clip-level split done there.
+    # Save for the next step (classifier training) - clip-level split done there.
     import json
     Path("datasets/external/hit_bounce_features.json").write_text(json.dumps(all_events))
     print(f"\nSaved {len(all_events)} events -> datasets/external/hit_bounce_features.json")

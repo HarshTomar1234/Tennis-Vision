@@ -92,11 +92,11 @@ def evaluate(video_path: str, tracker: str = "yolo",
     print(f"{'─' * 45}")
 
     if det_pct >= 60:
-        print("VERDICT: GOOD — >60% real detections (acceptable for speed calc)")
+        print("VERDICT: GOOD - >60% real detections (acceptable for speed calc)")
     elif det_pct >= 30:
-        print("VERDICT: MARGINAL — 30–60% (speeds partially guessed)")
+        print("VERDICT: MARGINAL - 30–60% (speeds partially guessed)")
     else:
-        print("VERDICT: POOR — <30% real detections (speeds unreliable)")
+        print("VERDICT: POOR - <30% real detections (speeds unreliable)")
 
     return {
         "tracker":       tracker,

@@ -5,15 +5,15 @@ Constant-velocity Kalman filter for 2-D mini-court positions (player and ball).
 
 Two jobs, both from the same filter:
 
-1. Jitter reduction — a stationary or steadily-moving point stops visibly wobbling
+1. Jitter reduction - a stationary or steadily-moving point stops visibly wobbling
    frame to frame (João's feedback: "denoise the projections to real world coordinates
    using something like a Kalman filter").
 
-2. Instantaneous velocity — the filter's [vx, vy] state gives continuous ball/player
+2. Instantaneous velocity - the filter's [vx, vy] state gives continuous ball/player
    speed without depending on correctly identifying discrete shot events. This turned
    out to matter more than expected: speed_accuracy.py was failing because the
    distance-between-two-shot-frames approach is only as good as shot-event detection
-   (measured ceiling ~5/7 — see docs/journal/0003 and 0004). Kalman velocity sidesteps
+   (measured ceiling ~5/7 - see docs/journal/0003 and 0004). Kalman velocity sidesteps
    that entirely by estimating speed continuously from the whole trajectory.
 
 Uses cv2.KalmanFilter (already a dependency via opencv-python) rather than adding
@@ -73,11 +73,11 @@ def smooth_trajectories(
     measurement_noise: float = 1e-1,
 ) -> tuple[dict[int, dict[int, tuple[float, float]]], dict[int, dict[int, tuple[float, float]]]]:
     """
-    Smooth a {frame_num: {entity_id: (x, y)}} sequence — one independent Kalman filter
+    Smooth a {frame_num: {entity_id: (x, y)}} sequence - one independent Kalman filter
     per entity id (each player, or the ball), since they move independently.
 
     Accepts either a dict keyed by frame number (what MiniCourt's coordinate-conversion
-    methods return) or a plain list indexed by frame — both conventions exist in this
+    methods return) or a plain list indexed by frame - both conventions exist in this
     codebase. Frames are always processed in increasing frame-number order.
 
     Args:
@@ -85,7 +85,7 @@ def smooth_trajectories(
         process_noise, measurement_noise: filter tuning (see PositionKalmanFilter).
 
     Returns:
-        (smoothed_positions, velocities) — dicts keyed by frame number, same shape as
+        (smoothed_positions, velocities) - dicts keyed by frame number, same shape as
         the input. velocities values are (vx, vy) in px/frame (mini-court space).
     """
     if isinstance(positions, list):

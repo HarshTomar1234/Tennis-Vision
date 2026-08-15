@@ -6,8 +6,8 @@ Handles both coordinate mapping (video frame → mini-court) and rendering.
 
 Coordinate mapping pipeline
 ----------------------------
-Primary  : cv2.findHomography (14-point RANSAC) — perspective-correct.
-Fallback : nearest keypoint + normalised linear offset — used only when
+Primary  : cv2.findHomography (14-point RANSAC) - perspective-correct.
+Fallback : nearest keypoint + normalised linear offset - used only when
            RANSAC finds fewer than 4 inliers (severely noisy detections).
 
 Speed calculation accuracy
@@ -64,7 +64,7 @@ class MiniCourt:
     ) -> None:
         """
         Args:
-            frame:             First video frame — used to derive default dimensions.
+            frame:             First video frame - used to derive default dimensions.
             mini_court_width:  Fixed pixel width (ignored when layout_params provided).
             mini_court_height: Fixed pixel height (ignored when layout_params provided).
             layout_params:     Dict from UILayoutManager.get_mini_court_params().
@@ -248,7 +248,7 @@ class MiniCourt:
 
         Finds the geometrically closest video keypoint, then applies a linear
         offset (normalised by frame dimensions) to the corresponding mini-court
-        keypoint.  Less accurate than homography — cannot correct perspective.
+        keypoint.  Less accurate than homography - cannot correct perspective.
 
         y_scale: compensates for aspect-ratio differences between the video
                  perspective and the orthographic drawing (1.4 for player feet,
@@ -284,7 +284,7 @@ class MiniCourt:
             use_homography:  Attempt RANSAC homography first when True.
 
         Returns:
-            (player_positions, ball_positions) — dicts with the same outer
+            (player_positions, ball_positions) - dicts with the same outer
             structure as the inputs, but values are (x, y) mini-court coords.
         """
         # Detect per-frame vs. single-frame keypoint input
@@ -366,7 +366,7 @@ class MiniCourt:
         Map the ball to mini-court coordinates, respecting floor-level validity.
 
         The floor homography is only geometrically correct when the ball is AT floor
-        level (a contact or a bounce — see utils.ball_state.classify_floor_level).
+        level (a contact or a bounce - see utils.ball_state.classify_floor_level).
         Projecting an airborne pixel through it gives a wrong position, because the
         ball has real height that the floor-plane transform cannot see.
 
@@ -374,7 +374,7 @@ class MiniCourt:
         mini-court position for in-flight frames between the surrounding floor-level
         anchors. This draws the ball's true ground track instead of a geometrically
         invalid airborne scatter (see docs/journal/0003 and João's feedback in
-        docs/reference/APPROACH.md — "only project ball for floor bounces or player
+        docs/reference/APPROACH.md - "only project ball for floor bounces or player
         hits"). Frames before the first anchor or after the last hold at that anchor
         (no extrapolation).
 
@@ -397,7 +397,7 @@ class MiniCourt:
         )
         _h_cache: dict[tuple, np.ndarray | None] = {}
 
-        # Pass 1 — project the ball at every floor-level anchor frame only.
+        # Pass 1 - project the ball at every floor-level anchor frame only.
         anchors: dict[int, tuple[float, float]] = {}
         for frame_num in range(n):
             if floor_level_states[frame_num] != "floor_level":
@@ -426,7 +426,7 @@ class MiniCourt:
             except (ValueError, TypeError, IndexError):
                 continue
 
-        # Pass 2 — interpolate every frame between the surrounding anchors.
+        # Pass 2 - interpolate every frame between the surrounding anchors.
         anchor_frames = sorted(anchors)
         out: dict[int, dict] = {}
 
@@ -446,9 +446,9 @@ class MiniCourt:
             if prev_f is None and next_f is None:
                 out[frame_num] = {}
             elif prev_f is None:
-                out[frame_num] = {1: anchors[next_f]}          # before first anchor — hold
+                out[frame_num] = {1: anchors[next_f]}          # before first anchor - hold
             elif next_f is None:
-                out[frame_num] = {1: anchors[prev_f]}           # after last anchor — hold
+                out[frame_num] = {1: anchors[prev_f]}           # after last anchor - hold
             else:
                 t = (frame_num - prev_f) / (next_f - prev_f)    # linear interpolation
                 px, py = anchors[prev_f]
@@ -478,7 +478,7 @@ class MiniCourt:
         """Fill court with surface colour, then draw lines, net, and keypoint markers."""
         kp = self.drawing_key_points
 
-        # Court surface fill — outer corners in correct (non-self-intersecting) winding
+        # Court surface fill - outer corners in correct (non-self-intersecting) winding
         surface  = np.zeros_like(frame)
         corners  = np.array(
             [[kp[0], kp[1]], [kp[2], kp[3]], [kp[6], kp[7]], [kp[4], kp[5]]],
@@ -551,14 +551,14 @@ class MiniCourt:
         Draw a fading trail of the ball's recent mini-court positions.
 
         For each frame, connects the ball's last `trail_length` positions with a
-        polyline that thins toward the oldest point (a simple, cheap fade — full
+        polyline that thins toward the oldest point (a simple, cheap fade - full
         per-segment alpha blending isn't worth the extra draw calls for a small
         mini-court panel) and applies one transparency pass so the trail doesn't
         fully obscure the court beneath it.
 
         Args:
             frames:       output video frames (modified in place, also returned).
-            positions:    {frame_num: {1: (x, y)}} — e.g. from
+            positions:    {frame_num: {1: (x, y)}} - e.g. from
                           convert_ball_to_mini_court_coordinates.
             trail_length: how many recent frames the trail covers.
         """

@@ -7,7 +7,7 @@ Why this is not optional polish
 -------------------------------
 The pipeline already detects an untrustworthy court fit and records it in
 `summary.json` as `court_calibrated: false`. But the rendered video is what people
-actually look at, share and screenshot — and until now it drew exactly the same
+actually look at, share and screenshot - and until now it drew exactly the same
 confident km/h figures, stats panel and mini-court dots whether the court was fitted
 correctly or fitted to the crowd. A viewer had no way to tell the two apart.
 
@@ -15,7 +15,7 @@ That is the single most damaging failure mode for a project whose whole claim is
 its numbers are measured: a wrong number presented confidently travels further than a
 right one, and it travels as a screenshot with no JSON attached.
 
-Anything derived from the court homography — speeds, distances, mini-court positions —
+Anything derived from the court homography - speeds, distances, mini-court positions -
 is meaningless when the fit is wrong. Rather than silently hide those overlays (which
 would make the failure invisible in a different way), the run is stamped so the output
 carries its own caveat.

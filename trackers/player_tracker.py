@@ -23,8 +23,8 @@ class PlayerTracker:
         Choose the two players once for the whole clip, then keep only their tracks.
 
         Evidence is aggregated over every frame rather than read off frame 0. A
-        broadcast clip's first frame is arbitrary — it may open on a replay wipe or
-        with a player off-screen — and in any single frame a line judge or ball kid
+        broadcast clip's first frame is arbitrary - it may open on a replay wipe or
+        with a player off-screen - and in any single frame a line judge or ball kid
         can outscore a real player. Track persistence across the clip is what
         separates them: players are present for most of a rally, incidental people
         are not.
@@ -42,8 +42,8 @@ class PlayerTracker:
         Rank every track seen anywhere in the clip and return the chosen track ids.
 
         Returns one player per court half when both halves yield a qualifying
-        track. When only one does — a camera angle where the near baseline sits
-        outside the frame, for instance — it returns that single player rather than
+        track. When only one does - a camera angle where the near baseline sits
+        outside the frame, for instance - it returns that single player rather than
         promoting the next-best track, which in practice is a line judge or ball
         kid and would poison every downstream metric.
         """
@@ -105,7 +105,7 @@ class PlayerTracker:
 
         if len(chosen) < 2:
             print("  [PLAYER SELECTION V3] WARNING: only one half has a qualifying "
-                  "player — analysing a single player rather than guessing a second")
+                  "player - analysing a single player rather than guessing a second")
 
         print(f"  [PLAYER SELECTION V3] Final chosen: {[c['id'] for c in chosen]}")
         return [c['id'] for c in chosen]
@@ -315,7 +315,7 @@ class PlayerTracker:
                 continue
             # ByteTrack returns detections it has not yet confirmed into a track with
             # id=None. Player selection scores candidates by ID across frames, so a
-            # detection with no stable ID is unusable — skip it rather than invent one.
+            # detection with no stable ID is unusable - skip it rather than invent one.
             if box.id is None:
                 continue
             player_dict[int(box.id.tolist()[0])] = box.xyxy.tolist()[0]

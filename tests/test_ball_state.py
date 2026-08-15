@@ -1,6 +1,6 @@
 """
 tests/test_ball_state.py
-Pure unit tests for the ball state machine — no torch, no models, deterministic.
+Pure unit tests for the ball state machine - no torch, no models, deterministic.
 """
 import os
 import sys

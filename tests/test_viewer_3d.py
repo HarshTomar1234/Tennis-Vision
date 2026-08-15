@@ -3,7 +3,7 @@ Tests for utils/viewer_3d.py.
 
 The viewer is a generated artifact, so these check the things that silently break it:
 malformed embedded JSON, a missing video reference, coordinates that are not in court
-metres, and — most importantly — that an uncalibrated run is not presented as if it
+metres, and - most importantly - that an uncalibrated run is not presented as if it
 were measured.
 """
 import json
@@ -113,7 +113,7 @@ class TestHonesty:
 class TestEvidenceIsReal:
     """
     The first version emitted three identical hardcoded strings for every segment,
-    including "endpoints on the floor" — which was false for 14 of 16 segments in a
+    including "endpoints on the floor" - which was false for 14 of 16 segments in a
     real run, because a contact endpoint is 0.9-2.6 m up by construction. Evidence
     that the payload contradicts is worse than no evidence, so these tests pin it to
     the actual numbers.

@@ -71,7 +71,7 @@ def court_quad_area_fraction(keypoints: np.ndarray, frame_w: int, frame_h: int) 
     Fraction of the frame covered by the convex hull of the detected keypoints.
 
     Uses the hull rather than a fixed corner ordering because a bad detection has no
-    meaningful ordering — the hull is well defined either way.
+    meaningful ordering - the hull is well defined either way.
     """
     pts = np.asarray(keypoints, dtype=np.float32).reshape(-1, 2)
     if len(pts) < 3:
@@ -124,7 +124,7 @@ def line_support_score(
     along the line's perpendicular. A predicted line lying on the stands, the crowd,
     or bare court surface fails this test; a line lying on real paint passes it.
 
-    Returns a value in [0, 1] — the fraction of all samples across all 9 court lines
+    Returns a value in [0, 1] - the fraction of all samples across all 9 court lines
     that look like paint.
     """
     gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (3, 3), 0)
@@ -217,7 +217,7 @@ def main() -> None:
 
     print("\nRead the two known-BAD vs known-good rows: the gate threshold belongs")
     print("in the gap between them. If there is no gap, this signal does not work")
-    print("and the gate needs a different one — say so rather than picking a number.\n")
+    print("and the gate needs a different one - say so rather than picking a number.\n")
 
 
 if __name__ == "__main__":

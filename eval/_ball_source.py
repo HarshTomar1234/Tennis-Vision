@@ -2,7 +2,7 @@
 eval/_ball_source.py
 ────────────────────
 Shared helper so every eval measures the SAME ball detections the real pipeline
-uses (TrackNet, loaded from the cached stub when present — matching main.py).
+uses (TrackNet, loaded from the cached stub when present - matching main.py).
 
 Previously the evals hardcoded the old YOLO BallTracker, so they graded a worse
 configuration than the pipeline actually runs. This keeps them honest and in sync.

@@ -7,12 +7,12 @@ Why geometric specifically
 --------------------------
 `eval/court_keypoint_accuracy.py` measured the shipped weights on the held-out val
 split: 4.03 px median error, 96.8 % of images with all 14 keypoints inside 25 px,
-and — critically — near-identical accuracy across surfaces (blue 3.90, clay 4.58,
+and - critically - near-identical accuracy across surfaces (blue 3.90, clay 4.58,
 green 4.65). Meanwhile the model fails on roughly 5 of our 9 real YouTube clips.
 
 So the weakness is not surface colour, it is camera geometry: our failing clips all
 fail with the predicted court displaced vertically. This script therefore augments
-translation, scale and perspective — not colour. Colour jitter would have trained
+translation, scale and perspective - not colour. Colour jitter would have trained
 hard and fixed nothing.
 
 Approach
@@ -23,7 +23,7 @@ source resolution: the transform is linear so keypoints scale exactly, and warpi
 (~1 GB for the train split) because PNG decode, not the network, is the bottleneck.
 
 Keypoints are deliberately allowed to land outside the frame after augmentation.
-That is the situation we are training for — several of our clips have part of the
+That is the situation we are training for - several of our clips have part of the
 court out of shot, and the model must still place those corners sensibly.
 
 Usage:
@@ -59,7 +59,7 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 # Horizontal-flip keypoint remapping. A mirrored court swaps left and right, so the
 # slot for "far-left outer corner" must receive the mirrored "far-right outer
 # corner", and so on. The two centre-service-line points are on the mirror axis and
-# map to themselves. Verified against the dataset's own geometry — see
+# map to themselves. Verified against the dataset's own geometry - see
 # test_flip_map_is_an_involution() below.
 FLIP_MAP = [1, 0, 3, 2, 6, 7, 4, 5, 9, 8, 11, 10, 12, 13]
 
@@ -103,8 +103,8 @@ class CourtKeypointDataset(Dataset):
         """
         Build a 3x3 matrix combining translation, scale and a mild perspective warp.
 
-        Ranges are chosen to span the framings our real clips exhibit — courts
-        shifted vertically, filmed from lower angles, and at varying zoom — without
+        Ranges are chosen to span the framings our real clips exhibit - courts
+        shifted vertically, filmed from lower angles, and at varying zoom - without
         producing images no broadcast camera would ever capture.
         """
         s = INPUT_SIZE
@@ -162,7 +162,7 @@ def build_model(device: str) -> torch.nn.Module:
         model.load_state_dict(torch.load(BASE_WEIGHTS, map_location="cpu"))
         print(f"  fine-tuning from {BASE_WEIGHTS}")
     else:
-        print(f"  WARNING: {BASE_WEIGHTS} missing — training from ImageNet init")
+        print(f"  WARNING: {BASE_WEIGHTS} missing - training from ImageNet init")
     return model.to(device)
 
 
@@ -223,7 +223,7 @@ def main() -> None:
     print("NOTE: do not expect this val number to improve. The baseline weights were")
     print("trained on this exact distribution without augmentation, so they are near")
     print("optimal here. Success is val holding roughly steady while robustness on")
-    print("real clips improves — which only the clip-suite check can show.\n")
+    print("real clips improves - which only the clip-suite check can show.\n")
     baseline_med = med
     best = med
 
@@ -258,7 +258,7 @@ def main() -> None:
     print(f"Best val median     : {best:.2f} px"
           + (f"  -> {OUT_WEIGHTS}" if best < baseline_med else "  (never beat baseline; nothing saved here)"))
     print(f"Final epoch weights : {FINAL_WEIGHTS}")
-    print("\nGate before shipping — run BOTH, and adopt only if the clip suite improves:")
+    print("\nGate before shipping - run BOTH, and adopt only if the clip suite improves:")
     print(f"  python eval/court_keypoint_accuracy.py            # in-distribution, must hold")
     print(f"  python eval/court_validity_calibration.py         # real clips, must improve\n")
 

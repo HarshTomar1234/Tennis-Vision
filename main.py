@@ -81,7 +81,7 @@ def _lowest_ball_point_near(
     Ball centre at its lowest point on screen within ±`window` frames of `frame`.
 
     In image coordinates y grows downward, so the largest y is the ball nearest the
-    court surface — the instant of the bounce. Bounce candidates are accurate to a few
+    court surface - the instant of the bounce. Bounce candidates are accurate to a few
     frames, and using a frame where the ball is still airborne sends its floor
     projection far down-court, because the camera ray through a raised ball meets the
     ground well beyond the true landing point.
@@ -169,7 +169,7 @@ def load_config(config_path: str) -> dict:
     then the requested file.
 
     The base config always applies. Before this, an alternate config such as
-    configs/dev.yaml only merged over the built-in defaults — so dev.yaml, which
+    configs/dev.yaml only merged over the built-in defaults - so dev.yaml, which
     documents itself as "identical to config.yaml except caching", silently ran the
     OLD court model because the fine-tuned weights are configured in config.yaml's
     models: section, not in the code defaults.
@@ -183,7 +183,7 @@ def load_config(config_path: str) -> dict:
         else:
             # An explicitly requested config that doesn't exist is a user error, not
             # a situation to paper over with defaults.
-            print(f"warning: config file not found: {config_path} — "
+            print(f"warning: config file not found: {config_path} - "
                   f"using {_BASE_CONFIG} + built-in defaults", file=sys.stderr)
     return cfg
 
@@ -243,13 +243,13 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         summary["serve_avg_flight_speed_kmh"] = round(serve_speed_kmh, 1)
     if court_fit is not None:
         # Consumers must be able to tell a measured speed from one derived off a
-        # court fitted to the wrong part of the frame — the numbers look identical.
+        # court fitted to the wrong part of the frame - the numbers look identical.
         is_valid, support = court_fit
         summary["court_calibrated"] = bool(is_valid)
         summary["court_line_support"] = round(float(support), 3)
         if not is_valid:
             summary["warning"] = (
-                "Court fit failed validation — speeds, distances and mini-court "
+                "Court fit failed validation - speeds, distances and mini-court "
                 "positions are derived from an unreliable court and should not be "
                 "treated as measurements."
             )
@@ -371,7 +371,7 @@ def main():
         use_ball_stubs = cfg["stubs"].get("use_ball_stubs", False)
 
         if use_ball_stubs and Path(tracknet_stub).exists():
-            logger.info(f"  TrackNet v2 — loading from stub ({tracknet_stub})")
+            logger.info(f"  TrackNet v2 - loading from stub ({tracknet_stub})")
             with open(tracknet_stub, "rb") as f:
                 ball_detections = pickle.load(f)
         else:
@@ -475,14 +475,14 @@ def main():
     # ── 7. Shot frames + coordinate mapping ───────────────────────
     logger.info("[7/9] Detecting shot frames + mapping to mini-court...")
     # Union of two candidate signals: y-reversal (vertical trajectory flip) and
-    # x-velocity-change (horizontal redirect) — neither alone catches every real
+    # x-velocity-change (horizontal redirect) - neither alone catches every real
     # contact/bounce. Verified at dataset scale (91 clips) after full classification:
     # recall 75.8%→87.6%, precision 88.9%→90.3% vs y-reversal alone. See
     # docs/journal/0015 and utils.hit_bounce_classifier.detect_xvelocity_candidates.
     yrev_frames = ball_tracker.get_ball_shot_frames(ball_detections)
     xvel_frames = detect_xvelocity_candidates(ball_detections)
     # Third source, added 2026-08-09: a dedicated BOUNCE generator. The other two are
-    # hit-shaped by construction — measured on the full 95-clip labelled dataset,
+    # hit-shaped by construction - measured on the full 95-clip labelled dataset,
     # x-velocity recalls only 12.0% of real bounces (it looks for the horizontal
     # reversal that defines a racket strike) while this one recalls 83.9%. Without it
     # the serve's landing was routinely never proposed, so serve speed paired the
@@ -496,25 +496,25 @@ def main():
     )
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
-    # bounce) is a valid homography anchor — the floor transform is correct at floor
+    # bounce) is a valid homography anchor - the floor transform is correct at floor
     # level regardless of which caused it. In-flight frames interpolate between
-    # anchors instead of being projected (wrong — the ball has real height while
+    # anchors instead of being projected (wrong - the ball has real height while
     # airborne). See utils.ball_state and docs/journal/0003 for why contact-vs-bounce
     # is NOT needed for this part.
     floor_states = classify_floor_level(raw_reversal_frames, len(video_frames))
 
-    # CONTACT vs BOUNCE split for shot counting / stats only — geometry above doesn't
+    # CONTACT vs BOUNCE split for shot counting / stats only - geometry above doesn't
     # need this (every reversal is a valid floor anchor either way).
     #
     # Primary: trajectory-shape classifier (utils.hit_bounce_classifier), trained on
-    # 1,034 real events from the original TrackNet dataset — 84.1% held-out accuracy,
+    # 1,034 real events from the original TrackNet dataset - 84.1% held-out accuracy,
     # and on this project's own reference clip it recovered the exact real shot count
     # (7) where the player-proximity heuristic below topped out around 19-20. See
     # docs/journal/0012.
     #
-    # Fallback: player-proximity heuristic (~5/7 ceiling on our clip — journal 0003),
+    # Fallback: player-proximity heuristic (~5/7 ceiling on our clip - journal 0003),
     # used only for reversals the trajectory classifier can't reach a decision on (not
-    # enough trajectory context, e.g. near a clip boundary) — better than silently
+    # enough trajectory context, e.g. near a clip boundary) - better than silently
     # dropping them.
     shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
     traj_contacts, traj_bounces = classify_reversals_by_trajectory(
@@ -554,7 +554,7 @@ def main():
         ball_detections, all_court_keypoints, floor_states, use_homography=use_hom,
     )
 
-    # Kalman smoothing (Phase 1, Step 3) — stabilizes the projected dots frame to
+    # Kalman smoothing (Phase 1, Step 3) - stabilizes the projected dots frame to
     # frame (João's feedback) and gives continuous velocity for the shot-speed stat
     # below, instead of depending on distance between two possibly-noisy shot-frame
     # detections. See docs/journal/0004.
@@ -615,7 +615,7 @@ def main():
             distance_from_net_m = abs(hitter_mini[1] - net_y_px) * px_to_m_scale
 
             # Bounces strictly between the previous contact and this one. Zero means
-            # the ball was struck before it bounced — the definition of a volley.
+            # the ball was struck before it bounced - the definition of a volley.
             previous = [f for f in ball_shot_frames if f < frame]
             bounces_between = (
                 sum(1 for b in bounce_lookup if previous[-1] < b < frame)
@@ -650,7 +650,7 @@ def main():
                 logger.debug(f"    f{frame} {shot_classifications[frame]['shot_type']}: "
                              f"{'; '.join(reasons)}")
         # Upgrade forehand/backhand from real body geometry where pose is available.
-        # Serve, Volley and Smash keep their existing rules — those are genuine physical
+        # Serve, Volley and Smash keep their existing rules - those are genuine physical
         # signatures (overhead reach, net proximity). Forehand vs backhand was the one
         # label with no real basis in position data, so that is the only one replaced.
         # See utils/pose_shot_classifier.py and docs/journal/0006.
@@ -697,10 +697,10 @@ def main():
                 logger.info(
                     f"  Pose-based forehand/backhand: {upgraded} of "
                     f"{len(shot_classifications)} shots upgraded "
-                    f"(rest kept position-based — pose unavailable or ambiguous)"
+                    f"(rest kept position-based - pose unavailable or ambiguous)"
                 )
             else:
-                logger.info("  Pose model unavailable — keeping position-based labels")
+                logger.info("  Pose model unavailable - keeping position-based labels")
 
         types = [v["shot_type"] for v in shot_classifications.values()]
         logger.info(f"  {len(shot_classifications)} shots classified: {types}")
@@ -733,7 +733,7 @@ def main():
         if ball_start is None:
             continue
 
-        # Ball shot speed = peak Kalman velocity near the contact frame — matches how
+        # Ball shot speed = peak Kalman velocity near the contact frame - matches how
         # real speed guns measure it (at/near contact), not averaged over the whole
         # flight between two shot-frame detections. See docs/journal/0004.
         ball_speed_kmh = peak_speed_kmh_near_frame(
@@ -798,10 +798,10 @@ def main():
                 f"avg {stats_df['player_2_average_shot_speed'].iloc[-1]:.1f} km/h")
 
     # Serve speed, measured from floor-anchored geometry only (server's feet at
-    # contact, ball's first bounce) — the one speed in this pipeline that never
+    # contact, ball's first bounce) - the one speed in this pipeline that never
     # touches an airborne ball's floor projection. See utils/serve_speed.py.
     # The landing is found by the serve's own physics rather than taken from the
-    # generic bounce detector, which lands a few frames late on serves — and a few
+    # generic bounce detector, which lands a few frames late on serves - and a few
     # frames is decisive. Measured: the generic candidate sat after the ball had
     # already bounced and risen, projecting to -31 m on a 23.7 m court and yielding
     # 366 km/h. See utils/serve_landing.py.
@@ -875,7 +875,7 @@ def main():
     # Endpoint positions are computed here from scratch rather than reusing
     # ball_mini_court, for two reasons found in review:
     #   1. At a CONTACT the ball is 0.9-2.6 m in the air, so its floor projection is
-    #      displaced along the camera ray — the very error this module removes. The
+    #      displaced along the camera ray - the very error this module removes. The
     #      floor-valid measurement at a contact is the hitting player's FEET.
     #   2. ball_mini_court positions are clamped to the drawing panel's bounds, which
     #      is right for pixels on screen and wrong for physics input: a wide bounce
@@ -892,7 +892,7 @@ def main():
         court_length_m = (court_kp_draw[5] - court_kp_draw[1]) * px_to_m_scale
         # A ball can land out, but not in the stands. An event projecting further than
         # this beyond the lines is a misclassified event (an airborne point projected
-        # along the camera ray), and one such endpoint corrupts speed AND apex — seen
+        # along the camera ray), and one such endpoint corrupts speed AND apex - seen
         # live: a serve read 366 km/h from a landing that projected ~5x too far.
         out_margin_m = 5.0
         _h_cache_3d: dict = {}
@@ -910,7 +910,7 @@ def main():
 
             if frame in bounce_set:
                 # A bounce is on the floor, so the ball's own projection is valid there
-                # — but ONLY at the instant it actually touches. The candidate frame is
+                # - but ONLY at the instant it actually touches. The candidate frame is
                 # accurate to a few frames, and a ball caught still descending is metres
                 # in the air, which the floor homography throws far down-court. Measured:
                 # a serve landing projected to y = -36 m (court is 23.7 m long), which
@@ -947,14 +947,14 @@ def main():
                 # is the signature of a misclassified event, and knowing WHICH events
                 # fail is how the underlying detector gets fixed.
                 logger.debug(f"    f{frame:<5} {kind:<7} court=({x_m:6.1f}, {y_m:6.1f}) m "
-                             f"REJECTED — outside court +{out_margin_m:.0f} m "
+                             f"REJECTED - outside court +{out_margin_m:.0f} m "
                              f"(court is {court_width_m:.1f} x {court_length_m:.1f} m)")
 
         shot_type_by_frame = {f: info.get("shot_type") for f, info in shot_classifications.items()}
         trajectories_3d = reconstruct_rally(
             event_frames_3d, ball_positions_m, shot_type_by_frame, bounce_set, fps,
         )
-        # The same player cannot hit the ball twice in a row — the rules require a
+        # The same player cannot hit the ball twice in a row - the rules require a
         # bounce or the opponent between. A contact→contact segment with one hitter at
         # both ends therefore proves an event was missed between them, and its
         # feet-to-feet "flight" (the distance one player shuffled) is not a ball
@@ -962,6 +962,15 @@ def main():
         net_y_court_m = ((kp_sp[1] + kp_sp[5]) / 2.0 - origin_y) * px_to_m_scale
         kept = []
         for t in trajectories_3d:
+            # A bounce-to-bounce span has no racket contact at either end, so no shot
+            # was played across it. It is the ball bouncing on after a point ended, or
+            # the interpolator bridging dead time. Measured on input_video_2: 2 of 16
+            # segments, both at ~28 km/h, well below any struck ball.
+            if t.start_frame in bounce_set and t.end_frame in bounce_set:
+                logger.debug(f"    reject f{t.start_frame}->f{t.end_frame}: "
+                             f"bounce to bounce, no racket contact ({t.speed_kmh:.0f} km/h)")
+                continue
+
             both_contacts = (t.start_frame in hitter_by_frame
                              and t.end_frame in hitter_by_frame)
             if both_contacts:
@@ -1095,7 +1104,7 @@ def main():
         logger.info(f"Output video → {output_path}")
     else:
         alt = output_path.replace(".avi", "_fallback.mp4")
-        logger.warning(f"AVI save failed — retrying as {alt}...")
+        logger.warning(f"AVI save failed - retrying as {alt}...")
         if save_video(output_frames, alt):
             logger.info(f"Output video → {alt}")
         else:
@@ -1104,7 +1113,7 @@ def main():
     if viewer_spec is not None:
         # Built after the video so it can reference a browser-playable copy. The
         # pipeline writes AVI/MPEG-4 Part 2, which OpenCV produces reliably but no
-        # browser can play — the viewer's video tab was silently blank because a
+        # browser can play - the viewer's video tab was silently blank because a
         # <video> element with an unsupported source just shows nothing.
         trajectories, shot_labels, fit_ok = viewer_spec
         web_video = to_browser_playable(output_path)

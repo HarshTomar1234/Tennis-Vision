@@ -16,7 +16,7 @@ Two honest caveats, both material:
      only for clips where the serve visibly belongs to the point being played.
   2. Radar measures speed AT CONTACT. This pipeline measures AVERAGE SPEED OVER THE
      FLIGHT (see utils/serve_speed.py). Drag makes the average lower than the contact
-     speed, so a reading below ground truth is expected — the question this script
+     speed, so a reading below ground truth is expected - the question this script
      answers is *by how much, and how consistently*. A consistent ratio is a usable,
      explainable measurement. A scattered one means the method does not work.
 

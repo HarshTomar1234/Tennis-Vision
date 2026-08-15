@@ -2,25 +2,25 @@
 utils/hit_bounce_classifier.py
 ───────────────────────────────
 Classifies a floor-level ball event (from utils.ball_state.classify_floor_level) as a
-CONTACT (player hit) or BOUNCE (court), using ball-trajectory shape alone — no player
+CONTACT (player hit) or BOUNCE (court), using ball-trajectory shape alone - no player
 position needed.
 
 Why this exists
 ----------------
 The player-proximity heuristic in classify_contact_vs_bounce has a measured ~5/7 ceiling
 on our own footage (docs/journal/0003) that turned out to be mostly an artifact of an
-incomplete ground truth, not the heuristic itself (docs/journal/0010, 0011) — but while
+incomplete ground truth, not the heuristic itself (docs/journal/0010, 0011) - but while
 investigating that, feature exploration on the real 1,034-event TrackNet ground truth
 (eval/explore_hit_bounce_features.py) found a much stronger, complementary signal:
 
-  A bounce is a court reflection — mostly preserves horizontal (x) velocity, since the
+  A bounce is a court reflection - mostly preserves horizontal (x) velocity, since the
   ground doesn't impart much sideways force. A hit is a player redirecting the ball, which
   can reverse or sharply change x-direction (cross-court shots, returns). Measured: hits
   flip x-direction 71.8% of the time, bounces only 2.1% of the time.
 
 A 3-feature logistic regression (height, |vertical-velocity change|, |horizontal-velocity
 change|) trained on that data reaches 84.1% held-out accuracy on clip-level split (not
-event-level, which would leak camera/lighting/player correlations) — see
+event-level, which would leak camera/lighting/player correlations) - see
 eval/train_hit_bounce_classifier.py for the full methodology and eval/journal 0012 for
 the honest numbers.
 
@@ -39,7 +39,7 @@ from .ball_state import CONTACT, BOUNCE
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEIGHTS_PATH = "models/hit_bounce_classifier.json"
-EVENT_WINDOW = 4   # frames before/after the event used to compute velocity — must match
+EVENT_WINDOW = 4   # frames before/after the event used to compute velocity - must match
                     # the WINDOW constant in eval/explore_hit_bounce_features.py, since
                     # the trained weights assume this exact window size.
 
@@ -111,7 +111,7 @@ def classify_hit_or_bounce(
 
     Args:
         features: from compute_event_features(); None passes through as None (honest
-                  absence, not a guess — matches the convention in pose_shot_classifier).
+                  absence, not a guess - matches the convention in pose_shot_classifier).
         weights_path: trained weights, see eval/train_hit_bounce_classifier.py.
 
     Returns:
@@ -148,19 +148,19 @@ def detect_xvelocity_candidates(
     Candidate contact/bounce frames from local peaks in |horizontal-velocity change|,
     complementing (not replacing) trajectory-reversal detection.
 
-    Why this exists: journal 0014 found a structural gap in y-reversal-only detection —
+    Why this exists: journal 0014 found a structural gap in y-reversal-only detection -
     some real contacts (verified on the reference clip) don't reverse vertical direction
     at all, or reverse too shallowly to separate from noise at any threshold (swept
     min_delta_y down to 1 with no improvement). But the same clip's real shots often DO
     show a sharp change in horizontal velocity (the physical signal behind
-    hit_bounce_classifier — journal 0012), even when the vertical trajectory barely moves.
+    hit_bounce_classifier - journal 0012), even when the vertical trajectory barely moves.
 
     Tested standalone at dataset scale first (91 real clips): x-velocity alone actually
-    recalls WORSE than y-reversal (70.3% vs 76.0% at the best threshold) — it is not a
+    recalls WORSE than y-reversal (70.3% vs 76.0% at the best threshold) - it is not a
     good replacement. But the UNION of both signals recalls 87.7%, a genuine +11.7 point
     gain, because they catch different kinds of real events (vertical-redirect shots vs
     horizontal-redirect shots). Use this alongside get_ball_shot_frames, not instead of
-    it — feed the union to classify_reversals_by_trajectory, which is what actually
+    it - feed the union to classify_reversals_by_trajectory, which is what actually
     filters the resulting extra candidates back down to real contacts/bounces.
 
     Args:
@@ -254,10 +254,10 @@ def classify_reversals_by_trajectory(
     """
     Drop-in alternative to classify_contact_vs_bounce (utils.ball_state) with the same
     (contacts, bounces) return shape, but using trajectory shape instead of player
-    proximity — no player detection needed. See module docstring for why: 84.1% held-out
+    proximity - no player detection needed. See module docstring for why: 84.1% held-out
     accuracy on real data, vs the proximity heuristic's measured ~5/7 ceiling on our own
     footage (which turned out to be mostly an incomplete-ground-truth artifact, but the
-    trajectory signal is independently strong regardless — see docs/journal/0012).
+    trajectory signal is independently strong regardless - see docs/journal/0012).
 
     Frames where the classifier can't reach a decision (not enough trajectory context,
     or the weights aren't trained) are dropped from both lists rather than guessed.

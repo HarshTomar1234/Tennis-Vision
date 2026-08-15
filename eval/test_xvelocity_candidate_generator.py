@@ -3,16 +3,16 @@ eval/test_xvelocity_candidate_generator.py
 ────────────────────────────────────────────
 Tests whether an x-velocity-change-based candidate generator recovers real contacts that
 the existing y-reversal detector structurally misses (journal 0014: some real shots don't
-reverse vertical direction at all, or reverse too shallowly — not a threshold problem,
+reverse vertical direction at all, or reverse too shallowly - not a threshold problem,
 verified by sweeping min_delta_y down to 1 with no change).
 
 Motivation: journal 0012 established that |vx change| is what physically distinguishes a
 hit (player redirects the ball, can reverse x-direction) from a bounce or from noise
 (court/trajectory mostly preserves x-velocity). If that's true, an x-velocity-change local
 maximum should be a candidate-generation signal in its own right, not just a downstream
-classifier feature — and might catch real contacts a pure y-reversal misses.
+classifier feature - and might catch real contacts a pure y-reversal misses.
 
-Tested at dataset scale (91 real clips), not just our own clip — the count-match mistake
+Tested at dataset scale (91 real clips), not just our own clip - the count-match mistake
 from journal 0014 was exactly a result of not doing this the first time.
 """
 import csv
@@ -42,7 +42,7 @@ def load_clip(zf, label_path):
 
 
 def xvelocity_candidates(positions: list, min_delta_x: float = 5.0, min_spacing: int = 15) -> list[int]:
-    """Local maxima in |vx change| over a sliding window — the same feature that made the
+    """Local maxima in |vx change| over a sliding window - the same feature that made the
     hit/bounce classifier work, used here as a candidate generator instead of a filter."""
     n = len(positions)
     scores = [0.0] * n

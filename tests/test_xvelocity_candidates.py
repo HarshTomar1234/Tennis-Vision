@@ -1,6 +1,6 @@
 """
 tests/test_xvelocity_candidates.py
-Unit tests for detect_xvelocity_candidates — the complementary candidate generator from
+Unit tests for detect_xvelocity_candidates - the complementary candidate generator from
 journal 0015 (union with y-reversal detection improved dataset-scale recall 75.8%->87.6%
 and precision 88.9%->90.3%, verified end-to-end through the trained classifier, not just
 raw candidate counting).
@@ -34,7 +34,7 @@ def test_no_candidates_on_constant_velocity():
 
 
 def test_respects_minimum_spacing():
-    # two sharp redirects close together — only the stronger one should survive spacing
+    # two sharp redirects close together - only the stronger one should survive spacing
     xs = list(range(0, 100, 5))
     ys = [100.0] * len(xs)
     dets = _dets(xs, ys)

@@ -5,29 +5,29 @@ Ball state machine.
 
 Two independent classifications, for two different jobs:
 
-1. FLOOR_LEVEL vs IN_FLIGHT  — for geometry (Phase 1's actual deliverable).
+1. FLOOR_LEVEL vs IN_FLIGHT  - for geometry (Phase 1's actual deliverable).
    Every trajectory reversal (a y-direction flip) is a floor-level event: either a
    player hit the ball or it bounced off the court. The floor homography is valid at
-   *both*, so this split needs no further disambiguation — it only needs to separate
+   *both*, so this split needs no further disambiguation - it only needs to separate
    "ball is at floor level, project it" from "ball is airborne, interpolate between
    anchors instead." See docs/journal/0003 for why contact-vs-bounce is NOT required
    for this and why three tuning attempts at splitting them were abandoned.
 
-2. CONTACT vs BOUNCE (secondary, best-effort) — for shot counting / stats, where a
+2. CONTACT vs BOUNCE (secondary, best-effort) - for shot counting / stats, where a
    reversal caused by a player hitting the ball is meaningfully different from one
    caused by the court. This uses player-proximity as a heuristic and has a measured
    ceiling of ~5/7 correctly identified shots on the reference clip (see journal 0003)
-   — it is useful but NOT a reliable ground truth. Do not tune it further hoping for a
+   - it is useful but NOT a reliable ground truth. Do not tune it further hoping for a
    perfect split; the signal genuinely does not support it with position data alone.
    A better fix later is pose-based swing detection (Phase 2), not more thresholds here.
 """
 from __future__ import annotations
 
-# Primary labels — geometry (reliable)
+# Primary labels - geometry (reliable)
 FLOOR_LEVEL = "floor_level"
 IN_FLIGHT   = "in_flight"
 
-# Secondary labels — shot stats (best-effort, ~5/7 ceiling measured)
+# Secondary labels - shot stats (best-effort, ~5/7 ceiling measured)
 CONTACT = "contact"
 BOUNCE  = "bounce"
 
@@ -47,7 +47,7 @@ def classify_floor_level(
 ) -> list[str]:
     """
     The geometry-relevant classification: every reversal is FLOOR_LEVEL, everything
-    else is IN_FLIGHT. No proximity heuristic — both contact and bounce are valid
+    else is IN_FLIGHT. No proximity heuristic - both contact and bounce are valid
     homography anchors, so no further disambiguation is needed here.
 
     Returns a per-frame label list of length n_frames.
@@ -75,7 +75,7 @@ def classify_contact_vs_bounce(
     continuously near the ball throughout a rally. Use for approximate shot counting,
     not as ground truth.
 
-    Returns (contacts, bounces) — both subsets of reversal_frames.
+    Returns (contacts, bounces) - both subsets of reversal_frames.
     """
     contacts: list[int] = []
     bounces: list[int] = []

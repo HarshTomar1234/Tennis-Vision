@@ -13,7 +13,7 @@ first in the sequence:
         return self.SHOT_TYPES['SERVE']
 
 That premise only holds if a clip begins exactly at the start of a point. Ours are
-cut from mid-match, so the first detected shot is usually a mid-rally groundstroke —
+cut from mid-match, so the first detected shot is usually a mid-rally groundstroke -
 meaning every "Serve" the pipeline had ever reported was this heuristic firing rather
 than a serve being recognised. Worse, `classify_shots` skips shot frames with missing
 data, so when index 0 was skipped no shot got the flag at all and rallies came back
@@ -24,7 +24,7 @@ The evidence this uses instead
 ------------------------------
 A serve is the only shot in tennis that is simultaneously:
 
-  1. **Struck above the player's head.** The toss puts the ball well over the server —
+  1. **Struck above the player's head.** The toss puts the ball well over the server -
      contact is around 2.7 m while the player is under 2 m. In image space the ball
      sits above the top edge of the player's bounding box. This alone also catches
      smashes, which share the trait.
@@ -37,7 +37,7 @@ A serve is the only shot in tennis that is simultaneously:
 Both must hold. Each is independently measurable, and `explain=True` reports which
 one rejected a frame so failures can be diagnosed rather than guessed at.
 
-Deliberately NOT used: "is the first shot", ball direction, or rally position — those
+Deliberately NOT used: "is the first shot", ball direction, or rally position - those
 are the assumptions that produced the phantom serves in the first place.
 """
 from __future__ import annotations

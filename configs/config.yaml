@@ -1,5 +1,5 @@
 # Tennis-Vision Configuration
-# All tunable parameters live here — no magic numbers in code.
+# All tunable parameters live here - no magic numbers in code.
 # CLI override: python main.py --config my_config.yaml
 # Per-parameter: --input, --output, --no-stubs, --fast, --debug
 
@@ -47,7 +47,7 @@ detection:
   shot_player_distance_px: 300  # ball must be within this many px of a player to count as a shot (not a bounce)
 
 shot_classifier:
-  volley_distance_threshold: 40   # px from net on mini-court (was 150 — was broken)
+  volley_distance_threshold: 40   # px from net on mini-court (was 150 - was broken)
   smash_height_threshold: 0.7     # ball_y delta > this fraction of mini-court height
   net_y_position_relative: 0.5    # net sits at 50% of mini-court height
 

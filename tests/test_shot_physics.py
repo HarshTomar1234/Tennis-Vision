@@ -71,7 +71,7 @@ class TestLob:
         assert is_lob(1.8) is None
 
     def test_missing_apex_is_not_a_lob(self):
-        """No 3-D segment means no claim — never a default."""
+        """No 3-D segment means no claim - never a default."""
         assert is_lob(None) is None
 
 

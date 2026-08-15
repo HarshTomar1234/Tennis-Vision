@@ -108,7 +108,7 @@ def ensure_source(video_id: str, cookies_from: str | None = None,
         if not rate_limited or attempt == attempts:
             break
         backoff = pause_s * attempt * 3
-        print(f"  rate limited — waiting {backoff}s before retry")
+        print(f"  rate limited - waiting {backoff}s before retry")
         time.sleep(backoff)
 
     return None
@@ -137,7 +137,7 @@ def cut_clip(source: Path, spec: ClipSpec, out_dir: Path) -> Path | None:
 
 def main() -> int:
     # Windows consoles default to cp1252, which cannot encode the box-drawing and
-    # em-dash characters in this module's docstring — argparse prints it for --help
+    # em-dash characters in this module's docstring - argparse prints it for --help
     # and would raise UnicodeEncodeError before doing anything useful.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -146,7 +146,7 @@ def main() -> int:
                     help="build only one surface")
     ap.add_argument("--list", action="store_true", help="print the manifest and exit")
     ap.add_argument("--cookies-from-browser", default=None, metavar="BROWSER",
-                    help="e.g. chrome/edge/firefox — avoids YouTube's bot check. On "
+                    help="e.g. chrome/edge/firefox - avoids YouTube's bot check. On "
                          "Windows the browser must be CLOSED; it locks its cookie DB.")
     ap.add_argument("--pause", type=int, default=20, metavar="SECONDS",
                     help="pause between fresh source downloads (default 20)")
@@ -168,7 +168,7 @@ def main() -> int:
 
     for tool in ("yt-dlp", "ffmpeg"):
         if shutil.which(tool) is None:
-            sys.exit(f"{tool} not found on PATH — required to build the suite")
+            sys.exit(f"{tool} not found on PATH - required to build the suite")
 
     built, failed = [], []
     for spec in specs:

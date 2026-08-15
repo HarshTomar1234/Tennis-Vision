@@ -12,11 +12,11 @@ cross (both hands travel together), so the rule holds for them too.
 
 Three traps the naive version falls into
 ----------------------------------------
-1. Handedness — a left-hander's forehand mirrors a right-hander's, so any rule hardcoding
+1. Handedness - a left-hander's forehand mirrors a right-hander's, so any rule hardcoding
    "right hand = forehand" is wrong half the time.
-2. Facing direction — a player facing the camera has their anatomical left on the image's
+2. Facing direction - a player facing the camera has their anatomical left on the image's
    right, and the reverse when facing away. Image left/right flips meaning mid-rally.
-3. **Side-on collapse** — a player turns side-on to hit, which is precisely when the
+3. **Side-on collapse** - a player turns side-on to hit, which is precisely when the
    shoulder axis shrinks to almost nothing in image space. Measured on the reference
    clip: shoulder width fell to 2.8-8.5px on real groundstrokes (vs 17-23px in ready
    stance), where a 2-3px landmark error flips the answer. A 2-D image-plane rule is
@@ -25,7 +25,7 @@ Three traps the naive version falls into
 Traps 1 and 2 are avoided by working in body-relative coordinates and letting handedness
 emerge from which wrist is hitting. Trap 3 is avoided by building the body axis in the
 horizontal (x, z) plane using MediaPipe's depth: on the same side-on frame where shoulder
-dx was 0.037, dz was 0.607. x and z are complementary — as one collapses the other grows —
+dx was 0.037, dz was 0.607. x and z are complementary - as one collapses the other grows -
 so the horizontal-plane axis stays well-conditioned at every orientation. This is also the
 physically correct plane: forehand vs backhand is a horizontal rotation question.
 """
@@ -38,7 +38,7 @@ Landmark = tuple[float, float, float]   # (x_px, y_px, z_px)
 
 
 def _image_dist(a: Landmark, b_xy: tuple[float, float]) -> float:
-    """Distance in image space only — the ball has no depth estimate to compare against."""
+    """Distance in image space only - the ball has no depth estimate to compare against."""
     return ((a[0] - b_xy[0]) ** 2 + (a[1] - b_xy[1]) ** 2) ** 0.5
 
 
@@ -52,12 +52,12 @@ def classify_forehand_backhand(
     Decide forehand vs backhand from pose landmarks at a contact frame.
 
     Args:
-        landmarks: from PoseEstimator.detect_in_bbox — (x_px, y_px, z_px) per name.
+        landmarks: from PoseEstimator.detect_in_bbox - (x_px, y_px, z_px) per name.
                    Needs both shoulders and at least one wrist.
         ball_pos:  (x, y) ball centre in image space, used to pick the hitting hand.
         ambiguity_ratio: if both wrists are within this fraction of the body-axis length
                    of each other in ball-distance, the hitting hand is genuinely unclear
-                   (two-handed shot, overlapping arms) — return None rather than guess.
+                   (two-handed shot, overlapping arms) - return None rather than guess.
         max_contact_distance: if set, reject the frame when the hitting wrist is further
                    than this (in pixels) from the ball. A wrist that far away is not
                    hitting anything, so there is no shot to label. On the reference clip
@@ -68,7 +68,7 @@ def classify_forehand_backhand(
     Returns:
         (label, confidence 0-1), or None when the geometry cannot be determined.
         Confidence scales with how far the wrist is from the midline relative to the
-        body axis length — an arm barely off-centre is a weak signal and says so.
+        body axis length - an arm barely off-centre is a weak signal and says so.
 
         Returning None is deliberate. The point of this module is to replace a
         confident-sounding guess with either a real answer or an honest absence.
@@ -95,9 +95,9 @@ def classify_forehand_backhand(
     axis = (left_sh[0] - right_sh[0], left_sh[2] - right_sh[2])
     axis_len = (axis[0] ** 2 + axis[1] ** 2) ** 0.5
     if axis_len < 1e-6:
-        return None   # landmarks collapsed entirely — no usable body axis
+        return None   # landmarks collapsed entirely - no usable body axis
 
-    # The hitting hand is the wrist nearest the ball at contact (image space — the ball
+    # The hitting hand is the wrist nearest the ball at contact (image space - the ball
     # has no depth estimate).
     hitting_name, hitting_pos = min(
         wrists.items(), key=lambda kv: _image_dist(kv[1], ball_pos)

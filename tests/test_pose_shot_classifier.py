@@ -57,7 +57,7 @@ def test_left_handed_forehand_is_the_mirror_not_a_backhand():
     assert result[0] == FOREHAND
 
 
-# ── Facing away — the case image-space rules get wrong ───────────────────────
+# ── Facing away - the case image-space rules get wrong ───────────────────────
 
 def test_right_handed_forehand_facing_away_is_still_a_forehand():
     """Same shot as facing the camera, but the player has turned around, so the hitting
@@ -83,10 +83,10 @@ def test_right_handed_backhand_facing_away():
     assert result[0] == BACKHAND
 
 
-# ── Side-on — the stance players actually hit from ───────────────────────────
+# ── Side-on - the stance players actually hit from ───────────────────────────
 
 def test_side_on_forehand_uses_depth_not_image_x():
-    """A side-on player's shoulders are ~3px apart in image x — unusable in 2-D — but
+    """A side-on player's shoulders are ~3px apart in image x - unusable in 2-D - but
     well separated in depth. The horizontal (x, z) axis must still resolve this."""
     landmarks = {
         "RIGHT_SHOULDER": (150.0, 100.0, -30.0),   # nearer the camera
@@ -160,7 +160,7 @@ def test_returns_none_on_empty_input():
 
 
 def test_returns_none_on_fully_collapsed_shoulders():
-    """Shoulders collapsed in BOTH x and z — genuinely no body axis to project onto."""
+    """Shoulders collapsed in BOTH x and z - genuinely no body axis to project onto."""
     landmarks = {
         "RIGHT_SHOULDER": (150.0, 100.0, 0.0),
         "LEFT_SHOULDER":  (150.0, 100.0, 0.0),

@@ -9,11 +9,11 @@ Why a learned temporal model rather than more rules
 Shot types differ by *body mechanics unfolding over time*, not by any single-frame
 geometric fact. A slice and a topspin forehand can occupy identical positions at the
 contact frame and differ entirely in the swing path before and after it. Rules that
-look at one frame — which is what the current classifier does — cannot see that, and
+look at one frame - which is what the current classifier does - cannot see that, and
 in practice they produced 6 backhands out of 8 shots on one clip and phantom serves
 on most others. One model over a window of frames replaces N rules with N classes.
 
-Architecture: a small 1D CNN over the time axis. Deliberately small — 243 clips is a
+Architecture: a small 1D CNN over the time axis. Deliberately small - 243 clips is a
 tiny dataset and a transformer would memorise it. Two conv blocks plus global pooling
 has enough capacity for swing-shape discrimination and little enough to be trainable
 here.

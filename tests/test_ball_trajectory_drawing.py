@@ -41,7 +41,7 @@ def test_draws_something_when_trail_has_movement():
     }
     out = mini.draw_ball_trajectory(frames, positions)
 
-    # by the last frame, a 5-point trail exists — the frame should differ from blank
+    # by the last frame, a 5-point trail exists - the frame should differ from blank
     assert not np.array_equal(out[4], before[4])
 
 
@@ -50,7 +50,7 @@ def test_single_point_trail_does_not_crash_or_draw():
     frames = [np.zeros((720, 1280, 3), dtype=np.uint8) for _ in range(2)]
     before = [f.copy() for f in frames]
 
-    positions = {0: {1: (100, 100)}}   # only one point ever — no line possible
+    positions = {0: {1: (100, 100)}}   # only one point ever - no line possible
     out = mini.draw_ball_trajectory(frames, positions)
 
     for a, b in zip(out, before):

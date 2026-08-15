@@ -8,7 +8,7 @@ Why this is needed
 The pipeline writes AVI with the MPEG-4 Part 2 codec, which OpenCV's VideoWriter
 produces reliably across platforms. No browser can play it: Chrome, Firefox, Edge and
 Safari support H.264/MP4, WebM and Ogg, and none of them support AVI. The 3-D viewer
-referenced that file directly, so its "annotated video" tab showed nothing at all —
+referenced that file directly, so its "annotated video" tab showed nothing at all -
 silently, because a <video> element with an unsupported source simply stays blank.
 
 Transcoding to H.264 costs a few seconds and makes the whole output shareable: the
@@ -48,7 +48,7 @@ def to_browser_playable(source: str | Path, crf: int = 23) -> Path | None:
         return None
 
     if shutil.which("ffmpeg") is None:
-        logger.warning("ffmpeg not found on PATH — the 3-D viewer's video tab will be "
+        logger.warning("ffmpeg not found on PATH - the 3-D viewer's video tab will be "
                        "empty, because browsers cannot play the AVI the pipeline writes")
         return None
 

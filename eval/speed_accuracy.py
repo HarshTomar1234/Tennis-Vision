@@ -5,7 +5,7 @@ Runs the full pipeline and checks whether computed speeds are in realistic
 tennis ranges.
 
 Expected ranges (physics-based ground truth):
-  Ball  — serve: 150–220 km/h | groundstroke: 60–120 km/h | minimum: 30 km/h
+  Ball  - serve: 150–220 km/h | groundstroke: 60–120 km/h | minimum: 30 km/h
   Player movement: 0–29 km/h (max sprint ~28 km/h)
 
 Usage:
@@ -64,7 +64,7 @@ def evaluate(video_path: str) -> dict:
     ball_tracker, ball_dets = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
     ball_dets = ball_tracker.interpolate_ball_positions(ball_dets)
 
-    # ponytail: single-frame keypoints — fine for the near-static input_video_2 baseline;
+    # ponytail: single-frame keypoints - fine for the near-static input_video_2 baseline;
     # switch to court_detector.predict_all_frames(...) when validating a moving-camera clip.
     court_detector  = CourtLineDetector("models/keypoints_model.pth")
     court_keypoints = court_detector.predict(frames[0])
@@ -97,8 +97,8 @@ def evaluate(video_path: str) -> dict:
 
     # Real shots only (not bounces) for the shot-to-shot speed loop.
     # Two independent classifiers, compared: player-proximity (needs player detections,
-    # ~5/7 measured ceiling on this clip — journal 0003) vs trajectory-shape (needs only
-    # ball positions, 84.1% held-out accuracy on 1,034 real TrackNet-dataset events —
+    # ~5/7 measured ceiling on this clip - journal 0003) vs trajectory-shape (needs only
+    # ball positions, 84.1% held-out accuracy on 1,034 real TrackNet-dataset events -
     # journal 0012). Trajectory is used for the actual speed calc below since it's
     # validated at far larger scale; proximity result printed alongside for comparison.
     shot_frames_prox, bounce_frames_prox = classify_contact_vs_bounce(raw_reversals, ball_dets, player_dets)
@@ -109,7 +109,7 @@ def evaluate(video_path: str) -> dict:
 
     # Kalman-smoothed ball trajectory (Phase 1, Step 3): gives continuous velocity
     # instead of depending on distance-between-two-shot-events, which was the actual
-    # cause of the earlier FAIL (event detection ceiling ~5/7, not ball geometry —
+    # cause of the earlier FAIL (event detection ceiling ~5/7, not ball geometry -
     # see docs/journal/0004). Ball "shot speed" = peak velocity in a small window
     # around the contact frame, matching how real speed guns measure it (at/near
     # contact, not averaged over the whole flight).
@@ -130,7 +130,7 @@ def evaluate(video_path: str) -> dict:
         if speed > 0:
             ball_speeds.append(speed)
 
-    # Player movement speed stays distance/time between shots — it is already
+    # Player movement speed stays distance/time between shots - it is already
     # realistic (see baseline) and, unlike the ball, a player doesn't reverse velocity
     # instantaneously, so the discrete-event window issue doesn't apply the same way.
     for i in range(len(shot_frames) - 1):

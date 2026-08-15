@@ -1,7 +1,7 @@
 """
 tests/test_label_tool.py
 CSV round-trip and label-state tests for the labelling tool. The interactive OpenCV loop
-can't run headless, but everything that touches data can — and that's the part where a
+can't run headless, but everything that touches data can - and that's the part where a
 bug would silently corrupt a dataset.
 """
 import os

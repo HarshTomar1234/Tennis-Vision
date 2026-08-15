@@ -9,7 +9,7 @@ Scrubbing 570 frames blind to find 7 contacts is slow and error-prone. The exist
 trajectory-reversal detector is already about 5/7 right, so this tool pre-seeds its
 candidate list from that detector and lets you jump straight between candidates with
 n / p. You confirm, correct, or reject each one. Which candidates you *reject* is itself
-useful signal — those are exactly the false positives the detector needs to learn to drop.
+useful signal - those are exactly the false positives the detector needs to learn to drop.
 
 Everything is one keypress, no modifiers. Labelling is repetitive; chords slow it down.
 
@@ -71,7 +71,7 @@ def load_candidates(ball_stub: str) -> list[int]:
         return tracker.get_ball_shot_frames(
             tracker.interpolate_ball_positions(detections)
         )
-    except Exception as exc:  # noqa: BLE001 — candidates are a convenience, not a requirement
+    except Exception as exc:  # noqa: BLE001 - candidates are a convenience, not a requirement
         print(f"  (could not seed candidates: {exc})")
         return []
 
@@ -198,7 +198,7 @@ def main() -> None:
 
         if key == ord("q"):
             if dirty:
-                print("  Unsaved changes — press s to save, or q again to discard.")
+                print("  Unsaved changes - press s to save, or q again to discard.")
                 if (cv2.waitKey(0) & 0xFF) != ord("q"):
                     continue
             break

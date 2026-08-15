@@ -10,12 +10,12 @@
 This project implements a computer vision system for tennis match analysis. It detects
 players and the ball, tracks their movements, analyzes shots, and produces per-player
 statistics (shot speed, movement speed, shot type). This branch (`sprint/ball-geometry`)
-is active development on top of the camera-robust V2 pipeline — ball trajectory geometry,
+is active development on top of the camera-robust V2 pipeline - ball trajectory geometry,
 a real perspective homography, pose-based shot classification, and a trained hit/bounce
 classifier.
 
 Every number in this README is from an eval script in `eval/`, cited by name so it can be
-reproduced — see [Measured Results](#measured-results). Where something hasn't been
+reproduced - see [Measured Results](#measured-results). Where something hasn't been
 measured yet, it's marked as such rather than estimated.
 
 ## Quickstart
@@ -39,41 +39,41 @@ Add `--max-frames 60` for a quick check before committing to a full run.
 
 ## Features
 
-- **Player Detection and Tracking** — YOLOv8x with a 6-criteria scoring system to
+- **Player Detection and Tracking** - YOLOv8x with a 6-criteria scoring system to
   distinguish players from line judges, ball boys, and umpires
-- **Ball Detection and Trajectory** — TrackNet, with floor-anchored coordinate mapping
-  (the homography is only valid when the ball is at floor level — contact or bounce — so
+- **Ball Detection and Trajectory** - TrackNet, with floor-anchored coordinate mapping
+  (the homography is only valid when the ball is at floor level - contact or bounce - so
   in-flight positions interpolate between anchors instead of being projected directly)
   and a Kalman filter for smoothing and continuous velocity estimation
-- **Court Line Detection** — ResNet-50 regression, 14 keypoints, per-frame (handles
+- **Court Line Detection** - ResNet-50 regression, 14 keypoints, per-frame (handles
   camera pan/tilt) with temporal smoothing
-- **Shot Classification** — rule-based (serve/forehand/backhand/volley/smash from
+- **Shot Classification** - rule-based (serve/forehand/backhand/volley/smash from
   position and trajectory), with pose-based forehand/backhand upgrade via MediaPipe
   (body-relative geometry: does the hitting arm cross the shoulder midline in the
   horizontal plane, so it's handedness-, facing-, and side-on-agnostic)
-- **Hit vs. Bounce Classification** — trained logistic regression on ball-trajectory
+- **Hit vs. Bounce Classification** - trained logistic regression on ball-trajectory
   shape (height, vertical/horizontal velocity change), no player position needed
-- **Mini Court Visualization** — bird's-eye view with real ball trajectory trail
-- **Real Perspective Homography** — `cv2.findHomography`, not nearest-keypoint approximation
+- **Mini Court Visualization** - bird's-eye view with real ball trajectory trail
+- **Real Perspective Homography** - `cv2.findHomography`, not nearest-keypoint approximation
 
 ## Directory Structure
 
 ```
 Tennis-Vision/
-├── configs/                 # config.yaml — all tunable parameters, no magic numbers in code
+├── configs/                 # config.yaml - all tunable parameters, no magic numbers in code
 ├── constants/                # Court dimensions, physical plausibility bounds
 ├── court_line_detector/      # ResNet-50 court keypoint regression
-├── eval/                     # Accuracy/plausibility eval scripts — every claim in this
+├── eval/                     # Accuracy/plausibility eval scripts - every claim in this
 │                              #   README traces back to one of these
 ├── input_videos/             # Input tennis match videos
 ├── mini_visual_court/        # Mini-court coordinate mapping + trajectory drawing
-├── models/                   # Trained model weights (large weights gitignored — see
+├── models/                   # Trained model weights (large weights gitignored - see
 │                              #   Installation; models/hit_bounce_classifier.json is
 │                              #   small and committed)
 ├── notes/                    # CV concept write-ups (homography, Kalman filtering, SORT,
 │                              #   DeepSORT re-ID, temporal smoothing, shot detection)
-├── tests/                    # pytest unit tests (76 passing — see Measured Results)
-├── tools/                    # label_shots.py — keyboard-driven contact/bounce labeling tool
+├── tests/                    # pytest unit tests (76 passing - see Measured Results)
+├── tools/                    # label_shots.py - keyboard-driven contact/bounce labeling tool
 ├── trackers/                 # tracknet_ball_tracker.py (production), player_tracker.py,
 │                              #   ball_tracker.py (legacy YOLO ball tracker, superseded)
 ├── utils/
@@ -99,23 +99,23 @@ Tennis-Vision/
    pip install -r requirements.txt
    ```
 
-2. Model weights (gitignored — fetched by script, not committed):
+2. Model weights (gitignored - fetched by script, not committed):
    ```bash
    python scripts/download_models.py     # same as: tennis-vision download-models
    ```
 
    | Weight | Size | Source |
    |---|---|---|
-   | Court keypoints (`keypoints_model_geoaug.pth`) | 95 MB | [Coddieharsh/tennis-court-keypoints](https://huggingface.co/Coddieharsh/tennis-court-keypoints) — automatic |
-   | Pose (`pose_landmarker_lite.task`) | 6 MB | Google MediaPipe — automatic |
-   | Ball detection (`tracknet.pt`) | 43 MB | [yastrebksv/TrackNet](https://github.com/yastrebksv/TrackNet) — **one manual command**, printed by the script |
-   | Player detection (YOLOv8) | — | auto-downloads via `ultralytics` on first run |
+   | Court keypoints (`keypoints_model_geoaug.pth`) | 95 MB | [Coddieharsh/tennis-court-keypoints](https://huggingface.co/Coddieharsh/tennis-court-keypoints) - automatic |
+   | Pose (`pose_landmarker_lite.task`) | 6 MB | Google MediaPipe - automatic |
+   | Ball detection (`tracknet.pt`) | 43 MB | [yastrebksv/TrackNet](https://github.com/yastrebksv/TrackNet) - **one manual command**, printed by the script |
+   | Player detection (YOLOv8) | - | auto-downloads via `ultralytics` on first run |
 
    The court model is our fine-tune, published with a model card recording provenance
    and per-surface accuracy. TrackNet's weights are the upstream author's and their
    licence is unstated, so we point at the original rather than redistribute them.
 
-3. Optional — caching for repeated runs on one clip:
+3. Optional - caching for repeated runs on one clip:
    ```bash
    tennis-vision analyze clip.mp4 -c configs/dev.yaml
    ```
@@ -134,7 +134,7 @@ python main.py --debug                  # DEBUG log level
 ```
 
 All tunable parameters (which pipeline stages run, detection thresholds, shot classifier
-thresholds, I/O paths) live in `configs/config.yaml` — no magic numbers in code.
+thresholds, I/O paths) live in `configs/config.yaml` - no magic numbers in code.
 
 ## Measured Results
 
@@ -142,7 +142,7 @@ Every number below names the eval script that produced it. Dated, because these 
 still-moving numbers on an active sprint branch, not final claims.
 
 **Reproducibility, stated honestly:** scripts marked 📦 need a third-party dataset
-(7+ GB, not redistributable — see `datasets/README.md` for the source). Scripts marked
+(7+ GB, not redistributable - see `datasets/README.md` for the source). Scripts marked
 ✅ run against what ships in this repo plus the downloadable weights.
 
 ### Ball tracking (as of 2026-08-01)
@@ -150,15 +150,15 @@ still-moving numbers on an active sprint branch, not final claims.
 | Metric | Result | Script |
 |---|---|---|
 | Raw ball detection rate (TrackNet) | 82.5% (470/570 frames) | pipeline log |
-| Shot-frame accuracy | 7/7 matched, mean offset 4.9 frames — EXCELLENT | `eval/shot_frame_accuracy.py` |
+| Shot-frame accuracy | 7/7 matched, mean offset 4.9 frames - EXCELLENT | `eval/shot_frame_accuracy.py` |
 | Ball speed *plausibility* (a range check, **not** accuracy) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 | Player speed *plausibility* (range check) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 
 > ⚠️ Those two rows check that speeds are *physically possible*, not that they are
-> *correct*. Rally speeds are currently **systematically low** — see Limitations.
+> *correct*. Rally speeds are currently **systematically low** - see Limitations.
 
 ### Contact/bounce event detection, at real dataset scale (91 clips, TrackNet's own
-training data — same lineage as `models/tracknet.pt`, not a foreign benchmark)
+training data - same lineage as `models/tracknet.pt`, not a foreign benchmark)
 
 | Configuration | Recall | Precision | Script |
 |---|---|---|---|
@@ -169,7 +169,7 @@ training data — same lineage as `models/tracknet.pt`, not a foreign benchmark)
 ### Hit vs. bounce classification
 
 Trajectory-only logistic regression (ball height, vertical/horizontal velocity change),
-no player position needed — 84.1% held-out accuracy, trained on 820 events / tested on
+no player position needed - 84.1% held-out accuracy, trained on 820 events / tested on
 214 held-out events (clip-level split, not event-level, to avoid leaking
 camera/lighting/player correlations). See `models/hit_bounce_classifier.json` and
 `eval/train_hit_bounce_classifier.py`.
@@ -178,14 +178,14 @@ camera/lighting/player correlations). See `models/hit_bounce_classifier.json` an
 
 On the current reference clip: 6 of 21 shots upgraded from position-based to
 pose-verified forehand/backhand (the rest keep the position-based rule when pose is
-unavailable or ambiguous — reported, not hidden).
+unavailable or ambiguous - reported, not hidden).
 
 ### Test suite
 
 83 unit + integration tests passing (`pytest tests/`), covering ball-state
 classification, Kalman smoothing (including the physical speed-plausibility gate),
 mini-court coordinate mapping, trajectory drawing, pose-based shot classification, and
-the hit/bounce classifier. The end-to-end smoke test runs genuine fresh detection —
+the hit/bounce classifier. The end-to-end smoke test runs genuine fresh detection -
 it depends on no cached artefacts, so it fails for everyone if the pipeline breaks.
 
 ### Court keypoint accuracy (2026-08-09)
@@ -215,25 +215,25 @@ Stated plainly, because the point of this project is that its numbers are honest
   reconstruction (roadmap below), not a tuning change.
 - **Serve speed is implemented but unvalidated.** It uses only floor-valid geometry
   (server's feet, ball's bounce), and refuses to report rather than guess when its
-  physical gates fail — but it has not yet been confirmed against radar ground truth.
+  physical gates fail - but it has not yet been confirmed against radar ground truth.
 
 **Unmeasured:**
 - Volley and Smash labels come from position rules with **no ground truth**. Serve is
   now detected from physical evidence; those two are not.
 - The learned shot classifier (73.4 % on unseen subjects, 6 classes) is trained on
-  THETIS *indoor demonstration* footage and is **not wired into the pipeline** —
+  THETIS *indoor demonstration* footage and is **not wired into the pipeline** -
   transfer to broadcast video is unvalidated.
 - Player detection accuracy has no ground-truth eval script.
 
 **Out of scope right now:**
 - **Ground-level cameras fail.** Validated on broadcast and elevated fixed-camera
   footage only. The validity gate flags these rather than reporting wrong numbers.
-- **Doubles and amateur footage are untested** — every evaluation clip is broadcast
+- **Doubles and amateur footage are untested** - every evaluation clip is broadcast
   singles.
 
 ## Roadmap
 
-- 3-D ball trajectory reconstruction — the fix for rally speeds *and* the basis for a
+- 3-D ball trajectory reconstruction - the fix for rally speeds *and* the basis for a
   3-D rally viewer. These are the same problem: a correct 3-D trajectory is what makes
   a speed correct.
 - Validate the temporal shot classifier on broadcast footage, then wire it in.
@@ -243,13 +243,13 @@ Stated plainly, because the point of this project is that its numbers are honest
 
 Deeper CV concept write-ups in `notes/`:
 
-- `01_homography_basics.md` — Court coordinate transformation
-- `02_kalman_filter.md` — Ball trajectory smoothing
-- `03_temporal_smoothing.md` — Keypoint jitter reduction
-- `04_sort_tracker.md` — Multi-object tracking
-- `05_deepsort_reid.md` — Re-identification concepts
-- `06_shot_detection.md` — Shot classification methodology
-- `camera_robust_notes.py` — Complete camera-robust implementation guide
+- `01_homography_basics.md` - Court coordinate transformation
+- `02_kalman_filter.md` - Ball trajectory smoothing
+- `03_temporal_smoothing.md` - Keypoint jitter reduction
+- `04_sort_tracker.md` - Multi-object tracking
+- `05_deepsort_reid.md` - Re-identification concepts
+- `06_shot_detection.md` - Shot classification methodology
+- `camera_robust_notes.py` - Complete camera-robust implementation guide
 
 ## Contributing
 
@@ -257,13 +257,13 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 ## Credits
 
-- YOLOv8 (Ultralytics) — player detection
-- TrackNet — ball detection
-- MediaPipe — pose estimation
-- OpenCV — image processing, homography, Kalman filtering
-- PyTorch — deep learning components
-- ResNet-50 — court keypoint regression
+- YOLOv8 (Ultralytics) - player detection
+- TrackNet - ball detection
+- MediaPipe - pose estimation
+- OpenCV - image processing, homography, Kalman filtering
+- PyTorch - deep learning components
+- ResNet-50 - court keypoint regression
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License - see [LICENSE](LICENSE).

@@ -14,7 +14,7 @@ Wimbledon clip, every candidate showed a huge horizontal-velocity reversal:
     frame 295  vy_change 93.7   vx_change 248.3   P(hit) 1.000
 
 The classifier was right every time. `detect_xvelocity_candidates` is a **hit
-detector by construction** — a large |vx change| is precisely what distinguishes a
+detector by construction** - a large |vx change| is precisely what distinguishes a
 racket strike, because a racket reverses the ball's horizontal direction and a court
 bounce does not. Feeding its output to a hit/bounce classifier can only return hits.
 A 14-second rally yielded one bounce, the serve's landing was missed, and every
@@ -23,14 +23,14 @@ speed derived from a bounce was consequently wrong.
 The physical signature this looks for instead
 ---------------------------------------------
 A bounce applies a sharp **upward impulse** to a descending ball, while leaving its
-horizontal direction intact — friction and restitution scrub horizontal speed but do
+horizontal direction intact - friction and restitution scrub horizontal speed but do
 not reverse it. So a bounce is: descending beforehand, a sharp drop in vertical
 velocity, and vx not reversed. That last clause is what stops this module re-finding
 the hits, since a racket strike reverses vx.
 
 Why it does NOT require the ball to visibly start rising
 --------------------------------------------------------
-The obvious formulation — vy flips from positive to negative — was measured and is
+The obvious formulation - vy flips from positive to negative - was measured and is
 materially worse: **55.9 % bounce recall versus 80.9 %** for requiring only a sharp
 drop (30 clips, 136 labelled bounces). Roughly a quarter of real bounces never show
 an upward vy in the tracked trajectory at all: shallow bounces rebound at a low angle,
@@ -43,7 +43,7 @@ impulse.
 
 Deliberately generous: this generates *candidates*, and the downstream classifier and
 the service-box / plausibility gates do the filtering. Recall matters more than
-precision at this stage — a bounce never proposed here can never be recovered later.
+precision at this stage - a bounce never proposed here can never be recovered later.
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def detect_bounce_candidates(
                          beyond it, so 3.0 is the largest value that costs no recall
                          while rejecting the most jitter.
         max_vx_reversal_ratio: reject when horizontal direction reverses by more than
-                         this fraction of incoming speed — a racket, not a court. At
+                         this fraction of incoming speed - a racket, not a court. At
                          1.0 this rejects only outright reversals, which measured best;
                          tightening it discarded real bounces on balls hit nearly down
                          the line, which carry little vx to preserve.
@@ -114,7 +114,7 @@ def detect_bounce_candidates(
         # Must be descending into the event; a rising ball cannot be hitting the floor.
         if vy_before <= 0:
             continue
-        # The upward impulse. Deliberately NOT "vy_after < 0" — see module docstring:
+        # The upward impulse. Deliberately NOT "vy_after < 0" - see module docstring:
         # requiring a visible rise costs 25 points of recall on shallow/distant bounces.
         if (vy_before - vy_after) < min_vy_drop:
             continue

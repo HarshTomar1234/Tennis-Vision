@@ -70,7 +70,7 @@ class TestFindsTheLanding:
         assert result[0] == 20
 
     def test_returns_none_when_nothing_lands_in_the_box(self):
-        """No observed landing means no landing reported — never a guess."""
+        """No observed landing means no landing reported - never a guess."""
         detections = ball({20: (600, 300), 22: (610, 900)})
         projections = court_map({20: (3.0, -20.0), 22: (3.6, -31.0)})
 
@@ -90,7 +90,7 @@ class TestFlightWindow:
 
     def test_ignores_frames_beyond_a_plausible_flight(self):
         """
-        A later rally bounce must not be adopted as the serve's landing — the failure
+        A later rally bounce must not be adopted as the serve's landing - the failure
         that paired a serve with an event 1.78 s later and reported 37.9 km/h.
         """
         too_late = 10 + int(MAX_FLIGHT_S * FPS) + 5

@@ -34,7 +34,7 @@ def _cmd_analyze(argv: list[str]) -> int:
     parser.add_argument("--no-stubs", action="store_true",
                         help="force fresh detection, ignoring any cached stubs")
     parser.add_argument("--max-frames", type=int, default=0, metavar="N",
-                        help="process only the first N frames (0 = all) — quick check "
+                        help="process only the first N frames (0 = all) - quick check "
                              "on a long video before a full run")
     parser.add_argument("--fast", action="store_true",
                         help="single-frame court keypoints; faster, less camera-robust")

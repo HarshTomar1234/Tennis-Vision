@@ -7,7 +7,7 @@ Why recall is the metric that matters here
 ------------------------------------------
 Candidate generation is the first stage of the event pipeline. A bounce never
 proposed at this stage cannot be recovered by any downstream classifier, however
-good — which is exactly the failure that broke serve speed: the serve's landing was
+good - which is exactly the failure that broke serve speed: the serve's landing was
 never a candidate, so a later rally event was paired with the serve instead and the
 measured distance came out at 26.6 m for an ~18 m serve.
 
@@ -19,7 +19,7 @@ Ground truth
 ------------
 The original TrackNet dataset, already on disk. Each clip's `Label.csv` carries a
 per-frame `status`: 0 = flying, 1 = hit, 2 = bounce (encoding confirmed against the
-paper and the upstream training code — see datasets/README.md). We compare against
+paper and the upstream training code - see datasets/README.md). We compare against
 status == 2.
 
 A candidate counts as recalling a bounce if it lands within `--tolerance` frames of
@@ -72,13 +72,13 @@ def simulate_production_input(label_path: Path) -> list[dict]:
     The headline 83.9 % recall was measured on the dataset's own ground-truth
     coordinates: every frame present, no noise, no gaps. Production never sees that.
     It sees TrackNet output, which misses roughly 17.5 % of frames, passed through
-    `interpolate_ball_positions` — linear interpolation plus a 3-frame rolling median.
+    `interpolate_ball_positions` - linear interpolation plus a 3-frame rolling median.
 
     That matters specifically for bounce detection. The signal is a sharp change in
     vertical velocity, and the ball is hardest to detect exactly at a bounce, where it
     is fastest and lowest against the court. If the bounce frames themselves are the
     missing ones, interpolation draws a straight line straight through the event and
-    the median filter smooths what remains — erasing the discontinuity we key on.
+    the median filter smooths what remains - erasing the discontinuity we key on.
 
     Simulation: treat only clearly-visible frames (visibility == 1) as detected, which
     is the pessimistic-but-principled stand-in for a detector that struggles with fast,
@@ -193,7 +193,7 @@ def main() -> None:
 
     print("\n  Read this as: does the new generator find bounces the x-velocity one")
     print("  structurally cannot? A high bounce recall with a LOWER hit recall is the")
-    print("  goal — it means the two generators are complementary rather than")
+    print("  goal - it means the two generators are complementary rather than")
     print("  duplicating each other, which is what the union in main.py needs.\n")
 
 

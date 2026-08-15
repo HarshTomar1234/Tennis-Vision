@@ -1,8 +1,8 @@
 """
 tests/test_pose_estimator.py
-Unit tests for the pure-math part of PoseEstimator — bbox padding and frame-boundary
+Unit tests for the pure-math part of PoseEstimator - bbox padding and frame-boundary
 clamping. detect_in_bbox itself needs a real model + real image data (already validated
-empirically against real footage in docs/journal/0013 — the 0.45 padding value below is
+empirically against real footage in docs/journal/0013 - the 0.45 padding value below is
 measured, not a round-number guess).
 """
 import os
@@ -14,7 +14,7 @@ from utils.pose_estimator import PoseEstimator
 
 
 def _estimator():
-    # bypass model loading — these tests only exercise _pad_bbox, pure math
+    # bypass model loading - these tests only exercise _pad_bbox, pure math
     est = PoseEstimator.__new__(PoseEstimator)
     est.bbox_padding = 0.45
     return est
@@ -52,7 +52,7 @@ def test_zero_padding_returns_original_bbox_as_ints():
 def test_default_padding_is_the_measured_value():
     """0.45 was chosen empirically (recovered a real failed contact frame, didn't
     regress any previously-successful one at 0.15; 0.60 over-shot and did regress one)
-    — not a default that should silently drift back to a round number."""
+    - not a default that should silently drift back to a round number."""
     import inspect
     sig = inspect.signature(PoseEstimator.__init__)
     assert sig.parameters["bbox_padding"].default == 0.45

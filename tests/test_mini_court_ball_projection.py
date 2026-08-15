@@ -1,6 +1,6 @@
 """
 tests/test_mini_court_ball_projection.py
-Unit tests for MiniCourt.convert_ball_to_mini_court_coordinates — the state-aware
+Unit tests for MiniCourt.convert_ball_to_mini_court_coordinates - the state-aware
 ball projection that only trusts the homography at floor-level frames and
 interpolates in between.
 """
@@ -54,7 +54,7 @@ def test_in_flight_frames_interpolate_between_anchors():
     ball_boxes = [{} for _ in range(n)]
     ball_boxes[0] = {1: [x0 - 5, y0 - 5, x0 + 5, y0 + 5]}
     ball_boxes[4] = {1: [x1 - 5, y1 - 5, x1 + 5, y1 + 5]}
-    # frames 1,2,3 have no usable ball box — irrelevant, they're in_flight anyway
+    # frames 1,2,3 have no usable ball box - irrelevant, they're in_flight anyway
 
     states = [FLOOR_LEVEL, IN_FLIGHT, IN_FLIGHT, IN_FLIGHT, FLOOR_LEVEL]
 

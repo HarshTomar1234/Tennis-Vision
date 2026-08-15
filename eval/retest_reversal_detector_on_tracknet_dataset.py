@@ -3,7 +3,7 @@ eval/retest_reversal_detector_on_tracknet_dataset.py
 ─────────────────────────────────────────────────────
 Re-tests the production reversal detector (TrackNetBallTracker.get_ball_shot_frames)
 against real ground truth from the original TrackNet dataset (19,835 frames, 95 clips,
-confirmed hit/bounce labels — see datasets/README.md), instead of the 7 hand-labeled
+confirmed hit/bounce labels - see datasets/README.md), instead of the 7 hand-labeled
 shots on one clip that capped every attempt so far this sprint (journal 0003, 0007).
 
 This directly tests Phase 1's core assumption in utils/ball_state.py: "every trajectory
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from trackers.tracknet_ball_tracker import TrackNetBallTracker
 
 DATASET_ZIP = "datasets/external/tracknet_original/Dataset.zip"
-TOLERANCE = 10   # frames — matches the tolerance already used in shot_frame_accuracy.py
+TOLERANCE = 10   # frames - matches the tolerance already used in shot_frame_accuracy.py
 
 
 def load_clip(zf: zipfile.ZipFile, label_path: str) -> list[dict]:
@@ -115,7 +115,7 @@ def main():
     print(f"PRECISION (detected reversals that are real): "
           f"{matched_detected}/{total_detected} = {100*matched_detected/total_detected:.1f}%")
     print()
-    print("Ball height (y-px) at TRUE events — hit vs bounce (higher y = lower on screen):")
+    print("Ball height (y-px) at TRUE events - hit vs bounce (higher y = lower on screen):")
     print(f"  hit    n={len(hit_ys)}  mean={sum(hit_ys)/len(hit_ys):.1f}")
     print(f"  bounce n={len(bounce_ys)}  mean={sum(bounce_ys)/len(bounce_ys):.1f}")
 

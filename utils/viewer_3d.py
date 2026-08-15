@@ -19,7 +19,7 @@ checked them against the data: 14 of 16 segments had a non-floor endpoint (a con
 is 0.9-2.6 m up, by construction), and 6 of 16 ended outside the court lines. The
 claims were false, in the one feature whose entire purpose is that claims are earned.
 
-Evidence is now computed per segment from the actual reconstructed values — measured
+Evidence is now computed per segment from the actual reconstructed values - measured
 flight duration, real endpoint heights, the landing position with an in/out verdict,
 and net-crossing height. A viewer that asserts things the payload contradicts is worse
 than one with no evidence at all, because it teaches the reader to distrust everything
@@ -55,7 +55,7 @@ def _segment_evidence(t, fps: float) -> list[str]:
     The measured facts behind one displayed segment.
 
     Every string here is derived from the segment's own numbers. Nothing is asserted
-    that the payload does not contain — see the module docstring for why that matters.
+    that the payload does not contain - see the module docstring for why that matters.
     """
     duration = (t.end_frame - t.start_frame) / fps if fps else 0.0
     ex, ey, ez = t.end[0], t.end[1], t.end[2]
@@ -66,9 +66,9 @@ def _segment_evidence(t, fps: float) -> list[str]:
 
     inside = (0 <= ex <= COURT_WIDTH_DOUBLES_M) and (0 <= ey <= COURT_LENGTH_M)
     evidence = [
-        f"flight {duration:.2f} s — within a single-flight window",
+        f"flight {duration:.2f} s - within a single-flight window",
         f"starts {describe(sz)}, ends {describe(ez)}",
-        f"ends at ({ex:.1f}, {ey:.1f}) m — "
+        f"ends at ({ex:.1f}, {ey:.1f}) m - "
         f"{'inside the court' if inside else 'outside the lines (ball out)'}",
     ]
 
@@ -93,7 +93,7 @@ def _page_template() -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tennis-Vision — 3D Rally Viewer</title>
+<title>Tennis-Vision - 3D Rally Viewer</title>
 <style>
   :root { --bg:#0e1116; --panel:#161b22; --line:#30363d; --text:#e6edf3;
           --muted:#8b949e; --accent:#4ec9b0; --active:#ffa657; --idle:#6f97ad; }
@@ -325,7 +325,7 @@ function draw() {
     strokePath(s.points.map(p => [p[0], p[1], 0]), 'rgba(0,0,0,.35)', 1.2));
 
   // Depth-sort the arcs against the net so a ball behind the net renders behind it.
-  // Drawing arcs last unconditionally made every ball appear in front of the tape —
+  // Drawing arcs last unconditionally made every ball appear in front of the tape -
   // and "did it clear the net" is the question this view exists to answer.
   const drawables = DATA.segments.map((s, i) => ({kind:'arc', i, s, d: meanDepth(s.points)}));
   drawables.push({kind:'net', d: meanDepth(NET)});
@@ -410,7 +410,7 @@ const list = document.getElementById('list');
 if (!DATA.segments.length) {
   list.innerHTML = '<div class="empty">No flight segments passed the physical gates ' +
     'for this clip.<br><br>That means the court fit, the flight timing or the event ' +
-    'detection did not meet the bar — so nothing is shown rather than something ' +
+    'detection did not meet the bar - so nothing is shown rather than something ' +
     'unreliable.</div>';
 }
 DATA.segments.forEach((s, i) => {
@@ -440,7 +440,7 @@ function select(i) {
 
 const note = document.getElementById('note');
 note.innerHTML = (DATA.court_valid ? '' : '<span class="warn">COURT FIT FAILED ' +
-  'VALIDATION — positions and speeds below are NOT measurements.</span><br><br>') +
+  'VALIDATION - positions and speeds below are NOT measurements.</span><br><br>') +
   DATA.note;
 
 /* ---------- timeline ---------- */
@@ -587,7 +587,7 @@ def build_viewer(
     }
 
     # allow_nan=False so a NaN fails loudly here rather than emitting bare NaN, which
-    # is invalid JSON but valid JS — the page would load and the arc would silently
+    # is invalid JSON but valid JS - the page would load and the arc would silently
     # vanish into undefined coordinates.
     payload = json.dumps(data, allow_nan=False)
     # A "</" inside any string would close the <script> block early and break the page.

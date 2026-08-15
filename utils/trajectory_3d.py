@@ -3,13 +3,13 @@ utils/trajectory_3d.py
 ──────────────────────
 Reconstructs the ball's 3-D flight path between floor-anchored events.
 
-Why this exists — it is the speed fix, not a visualisation feature
+Why this exists - it is the speed fix, not a visualisation feature
 ------------------------------------------------------------------
 Every speed this pipeline reports is derived from the ball's position after
 projection through the *floor* homography. That projection is only valid while the
 ball touches the floor, and a tennis ball is airborne for roughly 90 % of its flight.
 The consequence is measurable: on a Wimbledon clip a serve contact projected to
-mini-court y = -16.7 — outside the court entirely — because the camera ray through a
+mini-court y = -16.7 - outside the court entirely - because the camera ray through a
 ball 2.7 m in the air meets the ground 25 m away. Rally speeds come out
 systematically low, and no amount of threshold tuning can fix a geometry error.
 
@@ -20,7 +20,7 @@ The method, and why it needs no optimiser
 -----------------------------------------
 Between two events the ball is in free flight, so its horizontal motion is constant
 and its vertical motion is parabolic. If both endpoints and the flight time are
-known, the trajectory is *fully determined* — it is a two-point boundary value
+known, the trajectory is *fully determined* - it is a two-point boundary value
 problem with a closed-form solution:
 
     vx  = (x1 - x0) / T
@@ -28,8 +28,8 @@ problem with a closed-form solution:
     vz0 = (z1 - z0 + ½·g·T²) / T          from z(T) = z0 + vz0·T - ½·g·T²
 
 No fitting, no initial guess, no convergence risk. The endpoints come from the
-homography at moments when it is *valid* — a bounce is on the floor by definition,
-and a player's feet are on the floor at contact — so the inputs are exactly the
+homography at moments when it is *valid* - a bounce is on the floor by definition,
+and a player's feet are on the floor at contact - so the inputs are exactly the
 measurements this pipeline can trust.
 
 `speed_kmh` is then the true 3-D speed at the start of the segment, including the
@@ -66,7 +66,7 @@ BOUNCE_HEIGHT = 0.0
 
 # Longest credible single free flight, in seconds. A groundstroke's contact-to-bounce
 # flight runs about 0.4-1.0 s; a high defensive lob is the extreme case and still lands
-# inside ~1.5 s. Anything longer is not one flight — it is two or more with the events
+# inside ~1.5 s. Anything longer is not one flight - it is two or more with the events
 # between them missed, or a dead-ball period between points that the ball interpolator
 # bridged. A parabola stretched across several flights is both slower and taller than
 # any of them, so admitting one corrupts speed and apex together.
@@ -76,7 +76,7 @@ BOUNCE_HEIGHT = 0.0
 # with durations 0.40-1.47 s and mean speed 60 km/h. Most segments (10 of 18) are now
 # under 0.85 s, which is the regime a real flight occupies.
 #
-# 1.5 s rather than something tighter because a genuine lob does reach it — the cap is
+# 1.5 s rather than something tighter because a genuine lob does reach it - the cap is
 # meant to reject stitched-together flights, not real high balls.
 MAX_PLAUSIBLE_FLIGHT_S = 1.5
 
@@ -113,7 +113,7 @@ class Trajectory3D:
         return math.dist(self.start[:2], self.end[:2])
 
     def height_at(self, fraction: float) -> float:
-        """Height at a fraction (0..1) through the flight — used for net clearance."""
+        """Height at a fraction (0..1) through the flight - used for net clearance."""
         t = max(0.0, min(1.0, fraction)) * self.duration_s
         return self.start[2] + self.velocity[2] * t - 0.5 * GRAVITY * t * t
 
@@ -123,7 +123,7 @@ def estimate_contact_height(shot_type: str | None) -> float:
     Height of the racket strike, in metres.
 
     A contact is the one endpoint not on the floor, so its height cannot come from
-    the homography. These are population averages by shot type — deliberately coarse,
+    the homography. These are population averages by shot type - deliberately coarse,
     and the reconstruction is not very sensitive to them: a 20 cm error over an 18 m
     flight changes the launch angle by well under a degree.
     """
@@ -192,7 +192,7 @@ def crosses_net(start_xy_m, end_xy_m, net_y_m: float) -> bool:
 
     Two contacts made by different players MUST cross the net, because the players
     stand on opposite sides. A segment joining them that stays on one side therefore
-    proves an event between them was missed — the opponent's shot went undetected and
+    proves an event between them was missed - the opponent's shot went undetected and
     two same-side events were joined into a flight that never happened.
 
     Measured on input_video_2: 7 of 16 reconstructed segments never crossed the net,

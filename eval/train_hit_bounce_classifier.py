@@ -5,20 +5,20 @@ Trains and honestly evaluates a hit-vs-bounce classifier on the real 1,034-event
 set from explore_hit_bounce_features.py.
 
 Ladder-thinking, in order:
-  1. Single strongest feature (|vx change|) with a plain threshold — 80.4% held-out.
-     (height_y alone: 55.1% — barely above the class baseline, confirms the earlier
+  1. Single strongest feature (|vx change|) with a plain threshold - 80.4% held-out.
+     (height_y alone: 55.1% - barely above the class baseline, confirms the earlier
      coarse mean/std comparison was too optimistic about height on its own.)
-  2. 3-feature logistic regression (height_y, vy_change_mag, vx_change_mag) — 84.1%
+  2. 3-feature logistic regression (height_y, vy_change_mag, vx_change_mag) - 84.1%
      held-out, train/test nearly identical (84.0%/84.1%, so not overfitting). The
      ~3.7-point gain over the single feature earns the extra (still small, interpretable)
-     complexity. Stopping here — more features would need justifying against this bar too.
+     complexity. Stopping here - more features would need justifying against this bar too.
 
 Split by CLIP, not by event, throughout: events from the same clip share camera,
 lighting, and players, so an event-level split would leak information and overstate
 accuracy.
 
 Saves the trained logistic-regression weights to models/hit_bounce_classifier.json for
-utils/hit_bounce_classifier.py to load — kept as data, not hardcoded, so retraining on
+utils/hit_bounce_classifier.py to load - kept as data, not hardcoded, so retraining on
 more data later doesn't need a code change.
 """
 import json

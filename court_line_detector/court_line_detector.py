@@ -9,7 +9,7 @@ class CourtLineDetector:
         """
         Args:
             model_path: path to the trained ResNet-50 keypoint regression weights.
-            device:     torch device string. Defaults to CUDA when available —
+            device:     torch device string. Defaults to CUDA when available -
                         keypoint detection runs once per frame and was the slowest
                         stage of the pipeline by a wide margin while pinned to CPU.
         """

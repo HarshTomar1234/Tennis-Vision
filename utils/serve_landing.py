@@ -7,7 +7,7 @@ Why the generic bounce detector is not enough here
 --------------------------------------------------
 `detect_bounce_candidates` looks for a vertical-velocity impulse anywhere in the
 trajectory. That works across a rally, but on a serve it routinely lands a few frames
-late — and a few frames is the whole problem. Measured on a Wimbledon clip whose
+late - and a few frames is the whole problem. Measured on a Wimbledon clip whose
 broadcast radar read 215.6 km/h: the candidate after the serve contact sat at f261,
 by which point the ball had already bounced and was rising again. Its floor
 projection came out at y = -31 m on a 23.7 m court, because the camera ray through a
@@ -75,7 +75,7 @@ def find_serve_landing(
 
     Returns:
         (landing_frame, (x_m, y_m)), or None when no frame in the window satisfies the
-        constraints — meaning the landing was not observed and nothing should be
+        constraints - meaning the landing was not observed and nothing should be
         reported for this serve.
     """
     if fps <= 0 or contact_frame < 0:

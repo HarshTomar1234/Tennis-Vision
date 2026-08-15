@@ -9,7 +9,7 @@ Every other speed in this pipeline is derived from the ball's position after it 
 been projected through the *floor* homography. That projection is only correct when
 the ball is actually touching the floor. A tennis ball is airborne for roughly 90 %
 of its flight, so its floor projection is the point where the camera ray through the
-ball meets the ground — not where the ball is. Speeds computed from that projection
+ball meets the ground - not where the ball is. Speeds computed from that projection
 are wrong by an amount that depends on ball height and camera geometry, and measured
 against broadcast radar on our own clips they came out roughly half the true value.
 
@@ -22,7 +22,7 @@ Two things in a serve ARE reliably on the floor:
 
 Both project through the floor homography correctly. The horizontal distance between
 them is therefore a real measurement in metres, and dividing by the flight time gives
-a real speed — no airborne projection involved anywhere.
+a real speed - no airborne projection involved anywhere.
 
 Ignoring the ball's vertical drop costs almost nothing: a serve struck at ~2.7 m and
 landing ~18 m away travels sqrt(18² + 2.7²) = 18.2 m, so treating the path as
@@ -32,7 +32,7 @@ What this number is, precisely
 ------------------------------
 It is the **average speed over the flight**, whereas a broadcast radar gun reports
 the speed **at contact**. Air drag means the ball is always slower later in flight,
-so this figure reads systematically below the televised one — expect roughly 10-15 %
+so this figure reads systematically below the televised one - expect roughly 10-15 %
 for a flat serve. That is a known, explainable offset, not an error, and it must be
 reported as "average flight speed" rather than dressed up as a radar-equivalent
 number. `eval/serve_speed_accuracy.py` measures the real offset against broadcast
@@ -59,7 +59,7 @@ def bounce_is_in_service_box(
     ---------------------------------------------------
     The whole method rests on the bounce being a real floor contact, because only
     then is its floor projection meaningful. The hit/bounce classifier is ~84 %
-    accurate, so roughly one in six "bounces" is not one — and when a mid-flight
+    accurate, so roughly one in six "bounces" is not one - and when a mid-flight
     point is used instead, the ball is metres in the air and its floor projection
     lands far away. Measured on a Wimbledon clip: a serve contact projected to
     mini-court y = -16.7, i.e. *outside the court*, from a server standing at
@@ -148,7 +148,7 @@ def find_serve_and_bounce(
     The candidate is the first bounce after contact, but it is only accepted if the
     interval is a plausible serve flight time. Without that check the pairing silently
     latches onto a later rally bounce when the serve's own landing was missed by the
-    detector — measured on our own clip 5, which paired a contact with a bounce 46
+    detector - measured on our own clip 5, which paired a contact with a bounce 46
     frames (1.78 s) later and reported 37.9 km/h for a serve the broadcast radar
     clocked at 182 km/h. A wrong number presented confidently is worse than no number,
     so an implausible interval returns None.
@@ -171,7 +171,7 @@ def find_serve_and_bounce(
             continue
         flight_s = (bounce - contact_frame) / fps
         if flight_s < MIN_SERVE_FLIGHT_S:
-            continue          # too soon to be the landing — likely detector noise
+            continue          # too soon to be the landing - likely detector noise
         if flight_s > MAX_SERVE_FLIGHT_S:
             return None       # the real landing was missed; do not pair with a later bounce
         return contact_frame, bounce

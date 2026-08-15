@@ -14,7 +14,7 @@ and detect one pose inside it. Fewer false positives, much less compute.
 Why only on contact frames
 --------------------------
 The label we want is per-shot, not per-frame. Running pose on all 570 frames is wasted
-work — the caller passes only the frames where a shot was detected.
+work - the caller passes only the frames where a shot was detected.
 
 API note: mediapipe 1.0.0 removed the legacy `mp.solutions.pose` interface. This uses the
 current Tasks API (`mediapipe.tasks.python.vision.PoseLandmarker`), which requires a
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # Landmark names this module exposes. MediaPipe labels these anatomically (LEFT_WRIST is
 # the person's own left wrist regardless of which way they face the camera), which is
-# what makes the body-relative shot geometry work — see utils/pose_shot_classifier.py.
+# what makes the body-relative shot geometry work - see utils/pose_shot_classifier.py.
 UPPER_BODY_LANDMARKS = (
     "LEFT_SHOULDER", "RIGHT_SHOULDER",
     "LEFT_ELBOW",    "RIGHT_ELBOW",
@@ -64,17 +64,17 @@ class PoseEstimator:
         Args:
             model_path:     path to the MediaPipe .task bundle.
             min_visibility: landmarks below this visibility score are treated as missing
-                            rather than trusted — a low-visibility wrist is a guess, and
+                            rather than trusted - a low-visibility wrist is a guess, and
                             a guessed wrist produces a guessed shot label.
             bbox_padding:   fraction of bbox size to expand the crop by. A tracked box is
                             tight around the torso and clips a fully extended hitting arm
-                            entirely — MediaPipe then fails to find a pose at all rather
+                            entirely - MediaPipe then fails to find a pose at all rather
                             than returning a partial one. Measured on a real contact frame
                             where the player was stretched wide for the ball: 0.15 (the
                             old default) found nothing; 0.45 recovered a full pose without
                             regressing any frame that already worked at 0.15; 0.60 pulled
                             in enough background/other-player noise to break one of those.
-                            0.45 is the measured sweet spot, not a round-number guess —
+                            0.45 is the measured sweet spot, not a round-number guess -
                             see docs/journal/0013 for the sweep.
         """
         self.model_path     = model_path
@@ -109,13 +109,13 @@ class PoseEstimator:
                 for name in UPPER_BODY_LANDMARKS
             }
             logger.info(f"PoseEstimator loaded ({self.model_path})")
-        except Exception as exc:  # noqa: BLE001 — a missing/broken model must not kill the run
+        except Exception as exc:  # noqa: BLE001 - a missing/broken model must not kill the run
             logger.error(f"Failed to load pose model: {exc}")
             self._landmarker = None
 
     @property
     def available(self) -> bool:
-        """False when the model could not be loaded — callers should fall back."""
+        """False when the model could not be loaded - callers should fall back."""
         return self._landmarker is not None
 
     def _pad_bbox(self, bbox, frame_w: int, frame_h: int) -> tuple[int, int, int, int]:
@@ -141,7 +141,7 @@ class PoseEstimator:
         Why z matters here
         ------------------
         A tennis player turns side-on to hit, which collapses the shoulder axis in image
-        space — measured as low as 2.8px wide on this clip's groundstrokes, where a
+        space - measured as low as 2.8px wide on this clip's groundstrokes, where a
         2-3px landmark error flips the left/right sign outright. MediaPipe's z (depth
         relative to the hip midpoint) grows exactly when image-x shrinks: on a side-on
         frame here, shoulder dx was 0.037 while dz was 0.607. Carrying z lets the shot
@@ -190,7 +190,7 @@ class PoseEstimator:
             lm = pose[idx]
             if getattr(lm, "visibility", 1.0) < self.min_visibility:
                 continue
-            # MediaPipe returns coordinates normalised to the crop — map x/y back to the
+            # MediaPipe returns coordinates normalised to the crop - map x/y back to the
             # original frame so callers can compare against ball/court positions, and
             # scale z by crop width so all three components share pixel-like units.
             landmarks[name] = (
