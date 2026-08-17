@@ -146,15 +146,29 @@ still-moving numbers on an active sprint branch, not final claims.
 (7+ GB, not redistributable - see `datasets/README.md` for the source). Scripts marked
 ✅ run against what ships in this repo plus the downloadable weights.
 
-### Ball tracking (as of 2026-08-01)
+### Ball tracking (as of 2026-08-17)
 
 | Metric | Result | Script |
 |---|---|---|
-| Raw ball detection rate (TrackNet) | 82.5% (470/570 frames) | pipeline log |
+| Ball *detection rate* (a position was output, **not** an accuracy) | 89.6% of 2,365 frames | 📦 `eval/ball_localization_accuracy.py` |
+| Ball *localization* error vs ground truth | median **5.8px**, 75th 11.9px, 90th 19.4px (at 360x640) | 📦 `eval/ball_localization_accuracy.py` |
+| Ball located within 20px of ground truth | 90.7% of outputs, 82.9% of visible-ball frames | 📦 `eval/ball_localization_accuracy.py` |
+| Ball located within 5px of ground truth | 44.8% of outputs, 40.9% of visible-ball frames | 📦 `eval/ball_localization_accuracy.py` |
 | Shot-frame recall | 7/7 shots found, mean offset 10.1 frames | `eval/shot_frame_accuracy.py` |
 | Shot-frame precision | 70.0% (3 false positives in 10 reported shots), F1 0.82 | `eval/shot_frame_accuracy.py` |
 | Ball speed *plausibility* (a range check, **not** accuracy) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 | Player speed *plausibility* (range check) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
+
+> ⚠️ **Detection rate is not accuracy, and the difference here is large.** 89.6% is how
+> often the detector output a ball position. Only 40.9% of visible-ball frames are
+> located within 5px of the hand-labelled position, and 82.9% within 20px. Both numbers
+> are true and they measure different things. Most projects publish the first and let it
+> be read as the second.
+>
+> In practice: the detector reliably finds roughly where the ball is, and is not
+> pixel-precise. That is adequate for trajectory shape, bounce timing and speed over a
+> flight, and marginal for exact landing coordinates. Measured against the original
+> TrackNet dataset's own hand-labelled ground truth, 20 clips, 2,365 frames.
 
 > ⚠️ Those two rows check that speeds are *physically possible*, not that they are
 > *correct*. Rally speeds are currently **systematically low** - see Limitations.
