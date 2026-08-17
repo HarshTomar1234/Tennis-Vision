@@ -54,6 +54,13 @@ BASELINE_TOLERANCE_FRAC = 0.12
 # includes the raised hitting arm, which pushes its top edge up.
 HEAD_CLEARANCE_FRAC = 0.0
 
+# Two serves cannot be this close together. A point does not start twice inside a few
+# seconds, and even a fault followed by a second serve leaves time to retrieve a ball and
+# reset. Expressed in seconds rather than frames so it means the same thing at 25, 30 and
+# 60 fps. Deliberately conservative: it only has to reject candidates that are physically
+# impossible, not to judge how long a rally lasts.
+MIN_SERVE_SEPARATION_S = 3.0
+
 
 def _hitting_player(frame_players: dict, ball_center) -> int | None:
     """The player whose box centre is horizontally nearest the ball."""
@@ -126,6 +133,30 @@ def is_serve(
     return result(True, f"serve by player {player_id}")
 
 
+def _ball_clearance(frame: int, ball_detections: list[dict],
+                    player_detections: list[dict]) -> float:
+    """
+    How far above the hitter's head the ball sits, in that player's own box heights.
+
+    Used only to choose between serve candidates that are too close together in time.
+    Normalising by box height makes near and far players comparable, since the same real
+    clearance is far fewer pixels at the back of the court.
+    """
+    ball_box = ball_detections[frame].get(1)
+    frame_players = player_detections[frame]
+    if not ball_box or not frame_players:
+        return float("-inf")
+    ball_centre = get_center_of_bbox(ball_box)
+    player_id = _hitting_player(frame_players, ball_centre)
+    if player_id is None:
+        return float("-inf")
+    px1, py1, px2, py2 = frame_players[player_id]
+    height = py2 - py1
+    if height <= 0:
+        return float("-inf")
+    return (py1 - ball_centre[1]) / height
+
+
 def detect_serve_frames(
     contact_frames: list[int],
     ball_detections: list[dict],
@@ -133,10 +164,42 @@ def detect_serve_frames(
     player_mini_court: dict,
     far_baseline_y: float,
     near_baseline_y: float,
+    fps: float = 30.0,
 ) -> list[int]:
-    """Subset of `contact_frames` that carry serve evidence, in order."""
-    return [
+    """
+    Subset of `contact_frames` that carry serve evidence, in order.
+
+    Serves closer together than MIN_SERVE_SEPARATION_S are collapsed to one. A point
+    cannot start twice inside a second: even a fault and second serve are separated by
+    the time to retrieve a ball and reset. Measured on the eval suite, one clip reported
+    serves 18 frames apart, 0.6s, which is physically impossible and was the ball being
+    high above the player across a short window rather than two separate deliveries.
+
+    When candidates cluster, the one with the ball highest above the hitter's head is
+    kept. A serve's contact is the highest point of the toss, so the peak of a cluster is
+    the delivery and its neighbours are the frames either side of it.
+
+    `fps` matters because the separation is a duration, not a frame count: 18 frames is
+    0.6s at 30fps and 0.3s at 60fps, and only one of those readings is about tennis.
+    """
+    candidates = [
         frame for frame in sorted(contact_frames)
         if is_serve(frame, ball_detections, player_detections, player_mini_court,
                     far_baseline_y, near_baseline_y)
+    ]
+    if len(candidates) < 2:
+        return candidates
+
+    min_gap = max(1, int(round(MIN_SERVE_SEPARATION_S * max(fps, 1.0))))
+
+    clusters: list[list[int]] = [[candidates[0]]]
+    for frame in candidates[1:]:
+        if frame - clusters[-1][0] <= min_gap:
+            clusters[-1].append(frame)
+        else:
+            clusters.append([frame])
+
+    return [
+        max(cluster, key=lambda f: _ball_clearance(f, ball_detections, player_detections))
+        for cluster in clusters
     ]

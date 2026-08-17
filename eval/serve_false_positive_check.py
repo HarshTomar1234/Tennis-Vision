@@ -70,16 +70,23 @@ def analyse(video_path: str) -> dict:
         stub_path=stub_path_for_video("tracker_stubs/player_detections.pkl", video_path),
     )
 
+    # Per-frame keypoints, matching the pipeline's default (pipeline.per_frame_keypoints).
+    # Detecting once on frame 0 and reusing it looks equivalent and is not: on any clip
+    # where the camera pans, the frame-0 court no longer lies on the painted lines later
+    # in the clip, so the validity gate rejects a court the pipeline would have accepted.
+    # That mistake made this script report 5 of 9 clips failing when the pipeline passes
+    # most of them, which would have read as a pipeline regression rather than an eval bug.
     court = CourtLineDetector("models/keypoints_model_geoaug.pth")
-    keypoints = court.predict(frames[0])
-    court_ok, support = assess_court_fit(frames, keypoints)
+    all_keypoints = court.predict_all_frames(frames)
+    keypoints = all_keypoints[0]
+    court_ok, support = assess_court_fit(frames, all_keypoints)
 
     shots, _bounces, _raw = derive_shot_frames(ball_tracker, interpolated, players)
 
     mini_court = MiniCourt(frames[0])
     if court_ok:
         player_mini, _ = mini_court.convert_bounding_boxes_to_mini_court_coordinates(
-            players, interpolated, [keypoints] * len(frames)
+            players, interpolated, all_keypoints
         )
     else:
         # Without a trusted court there are no mini-court positions, so the baseline

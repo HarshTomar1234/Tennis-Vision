@@ -573,6 +573,7 @@ def main():
         serve_frames = detect_serve_frames(
             ball_shot_frames, ball_detections, player_detections, player_mini_court,
             far_baseline_y=court_kp[1], near_baseline_y=court_kp[5],
+            fps=fps,
         )
         logger.info(f"  Serve detection: {len(serve_frames)} of {len(ball_shot_frames)} "
                     f"contacts carry serve evidence {serve_frames if serve_frames else ''}")
@@ -658,19 +659,49 @@ def main():
                 for shot_frame, info in shot_classifications.items():
                     if info["shot_type"] not in ("Forehand", "Backhand"):
                         continue   # don't second-guess Serve/Volley/Smash
-                    ball_bbox = ball_detections[shot_frame].get(1)
-                    player_bbox = player_detections[shot_frame].get(info["player_id"])
-                    if ball_bbox is None or player_bbox is None:
+                    # Try the contact frame first, then the nearest frames either side.
+                    #
+                    # The contact frame is the worst moment to ask for a pose: the player
+                    # is fully extended, often rotated side-on, frequently occluded by
+                    # their own racket arm, and motion-blurred at broadcast shutter
+                    # speeds. Measured across the 9 eval clips with
+                    # eval/pose_availability_at_contacts.py, pose resolves on 77% of
+                    # contacts at the exact frame and 91% within +/-4 frames, so giving up
+                    # on the exact frame discards a seventh of all shots for no reason.
+                    #
+                    # Which side of the body a stroke comes off does not change in a
+                    # seventh of a second, so a neighbouring frame answers the same
+                    # question. The ball position is re-read at whichever frame is used,
+                    # rather than carried over from the contact frame, so the
+                    # wrist-to-ball check stays a like-for-like comparison.
+                    result = None
+                    landmarks = None
+                    player_bbox = None
+                    for offset in (0, -1, 1, -2, 2, -3, 3, -4, 4):
+                        f = shot_frame + offset
+                        if not (0 <= f < len(video_frames)):
+                            continue
+                        bbox = player_detections[f].get(info["player_id"])
+                        ball_bbox = ball_detections[f].get(1)
+                        if bbox is None or ball_bbox is None:
+                            continue
+                        player_bbox = bbox
+                        ball_xy = ((ball_bbox[0] + ball_bbox[2]) / 2.0,
+                                   (ball_bbox[1] + ball_bbox[3]) / 2.0)
+                        landmarks = pose_estimator.detect_in_bbox(video_frames[f], bbox)
+                        result = classify_forehand_backhand(
+                            landmarks, ball_xy,
+                            max_contact_distance=2.0 * (bbox[2] - bbox[0]),
+                        )
+                        if result is not None:
+                            if offset:
+                                logger.debug(
+                                    f"  Frame {shot_frame}: pose resolved at {f} "
+                                    f"(offset {offset:+d})"
+                                )
+                            break
+                    if player_bbox is None:
                         continue
-                    ball_xy = ((ball_bbox[0] + ball_bbox[2]) / 2.0,
-                               (ball_bbox[1] + ball_bbox[3]) / 2.0)
-                    landmarks = pose_estimator.detect_in_bbox(
-                        video_frames[shot_frame], player_bbox
-                    )
-                    result = classify_forehand_backhand(
-                        landmarks, ball_xy,
-                        max_contact_distance=2.0 * (player_bbox[2] - player_bbox[0]),
-                    )
                     if result is not None:
                         info["shot_type"] = result[0]
                         info["pose_confidence"] = round(result[1], 2)
