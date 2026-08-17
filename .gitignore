@@ -94,3 +94,8 @@ datasets/eval_clips/
 # Pipeline output and scratch analysis — generated, not source.
 output_videos/
 analysis/
+
+# Python packaging artifacts (produced by `python -m build` / `pip install -e .`)
+build/
+dist/
+*.egg-info/
