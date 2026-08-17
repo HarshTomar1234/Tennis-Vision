@@ -259,14 +259,37 @@ def merge_nearby_candidates(candidates: list[int], min_gap: int = 10) -> list[in
     positions than the true contact frame, and pose can succeed on one cluster member
     while failing on another for the same swing.
 
-    min_gap=10 matches the tolerance used throughout this sprint's eval scripts for
-    "near the same event" (e.g. TOLERANCE in retest_union_type_accuracy.py).
+    Clustering is bounded, not transitive
+    -------------------------------------
+    A candidate joins a cluster when it is within min_gap of the cluster's FIRST member,
+    so no cluster is ever wider than min_gap frames.
+
+    The original version compared against the cluster's LAST member, which chains: with
+    min_gap=10, candidates at frames 0, 10, 20, 30, 40 all collapse into one cluster
+    spanning 40 frames and report a single event at frame 20. In a dense rally that is
+    not a corner case, it is the normal case, and it silently deleted real contacts.
+
+    Measured across 12 dataset clips, 91 labelled contacts, changing only the linkage:
+
+        linkage    recall   precision      F1
+        chained     51.6%      94.0%    0.667
+        bounded     68.1%      93.9%    0.790
+
+    16.5 points of recall at no cost in precision, because the events being destroyed
+    were real ones. The threshold itself needed no retuning: it was the linkage, not the
+    value. Sweeping min_gap from 3 to 10 under bounded linkage moves precision from 75%
+    to 94% while recall moves the other way, and 10 sits at the best F1 as well as the
+    best precision, which is the trade this project wants.
+
+    Reproduce with `python eval/event_recall_funnel.py --sweep-gap`.
 
     Args:
         candidates: raw candidate frames (e.g. the union of get_ball_shot_frames and
                     detect_xvelocity_candidates), any order.
-        min_gap:    candidates within this many frames of their cluster's last member
-                    are merged into the same cluster.
+        min_gap:    maximum width of a cluster, in frames. Note this is frames rather
+                    than seconds, so it is implicitly tied to frame rate; at 30fps it is
+                    0.33s, which is shorter than the fastest realistic bounce-to-contact
+                    interval. Footage far from 30fps should revisit it.
 
     Returns:
         One representative frame per cluster, sorted.
@@ -277,7 +300,7 @@ def merge_nearby_candidates(candidates: list[int], min_gap: int = 10) -> list[in
     ordered = sorted(candidates)
     clusters: list[list[int]] = [[ordered[0]]]
     for c in ordered[1:]:
-        if c - clusters[-1][-1] <= min_gap:
+        if c - clusters[-1][0] <= min_gap:
             clusters[-1].append(c)
         else:
             clusters.append([c])

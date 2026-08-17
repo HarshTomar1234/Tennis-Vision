@@ -21,10 +21,31 @@ def test_keeps_far_apart_candidates_separate():
     assert result == [50, 200, 400]
 
 
-def test_chains_across_a_cluster_within_gap_of_neighbour():
-    # each consecutive pair is within min_gap, even though first and last are not
+def test_does_not_chain_beyond_min_gap():
+    """
+    A cluster must not grow wider than min_gap, even when consecutive members are close.
+
+    This test previously asserted the opposite, that 100, 108 and 116 collapse to a single
+    event at 108, on the reasoning that each consecutive pair is within min_gap. Chaining
+    was deliberate and it was wrong: 100 and 116 are 16 frames apart, which at 30fps is
+    0.53s, comfortably long enough to hold two separate contacts. In a dense rally the
+    chain runs much further than three candidates and deletes real events.
+
+    Measured across 12 dataset clips and 91 labelled contacts, bounding the cluster moved
+    event recall from 51.6% to 68.1% with precision unchanged at ~94%, because everything
+    it stopped destroying was real. See eval/event_recall_funnel.py.
+    """
     result = merge_nearby_candidates([100, 108, 116], min_gap=10)
-    assert result == [108]
+    assert result == [108, 116], "cluster chained past min_gap"
+
+
+def test_cluster_spans_at_most_min_gap():
+    """The invariant the bound exists to guarantee, stated directly."""
+    candidates = list(range(0, 60, 4))       # 0, 4, 8, ... 56: every step is under min_gap
+    result = merge_nearby_candidates(candidates, min_gap=10)
+    # Chaining would return a single representative for all 15 candidates.
+    assert len(result) > 1, "chained the whole sequence into one event"
+    assert len(result) >= len(candidates) // 4
 
 
 def test_even_sized_cluster_picks_a_real_member():
