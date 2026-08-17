@@ -60,6 +60,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 
 from trackers.tracknet_ball_tracker import TrackNetBallTracker
+from utils.kalman_smoother import rts_smooth
 
 DATASET_ZIP = "datasets/external/tracknet_original/Dataset.zip"
 
@@ -82,7 +83,7 @@ def load_clip(zf: zipfile.ZipFile, label_path: str, max_frames: int):
         rows = list(csv.DictReader(io.StringIO(f.read().decode("utf-8"))))
 
     clip_dir = label_path.rsplit("/", 1)[0]
-    frames, truth = [], []
+    frames, truth, contacts = [], [], []
     for i, r in enumerate(rows[:max_frames]):
         name = f"{clip_dir}/{i:04d}.jpg"
         try:
@@ -95,7 +96,11 @@ def load_clip(zf: zipfile.ZipFile, label_path: str, max_frames: int):
         frames.append(img)
         visible = r.get("visibility") not in ("0", "", None) and r.get("x-coordinate")
         truth.append((float(r["x-coordinate"]), float(r["y-coordinate"])) if visible else None)
-    return frames, truth
+        # status 1 = racket hit, 2 = bounce. Both are impulses that break the
+        # constant-velocity assumption the smoother is built on.
+        if r.get("status") in ("1", "2"):
+            contacts.append(i)
+    return frames, truth, contacts
 
 
 def heatmap_to_centre(intensity: np.ndarray, threshold: int, min_cluster: int):
@@ -106,7 +111,8 @@ def heatmap_to_centre(intensity: np.ndarray, threshold: int, min_cluster: int):
     return float(xs.mean()), float(ys.mean())
 
 
-def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]]) -> dict:
+def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]],
+             smooth_params: list[tuple[float, float]] | None = None) -> dict:
     tracker = TrackNetBallTracker(model_path="models/tracknet.pt")
     if tracker.model is None:
         print("TrackNet weights not loaded. Fetch them first (see README 'Models').")
@@ -120,14 +126,22 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]]) -> 
     stats = {v: [0, 0, 0, []] for v in variants}
     total_frames = 0
 
+    # Forward-backward smoothing needs the whole clip, so it is measured per clip after
+    # the raw detections are collected rather than frame by frame. Keyed by the
+    # (process_noise, measurement_noise) pair being tried.
+    smooth_stats = {p: [0, 0, 0, []] for p in smooth_params} if smooth_params else {}
+
     for ci, label_path in enumerate(labels, 1):
-        frames, truth = load_clip(zf, label_path, max_frames)
+        frames, truth, contacts = load_clip(zf, label_path, max_frames)
         if len(frames) < 3:
             continue
         print(f"  [{ci}/{len(labels)}] {label_path.rsplit('/', 2)[-2]}: {len(frames)} frames")
 
         orig_h, orig_w = frames[0].shape[:2]
         sx, sy = W / orig_w, H / orig_h   # ground truth is in original coords
+
+        clip_raw: list[tuple[float, float] | None] = []
+        clip_gt: list[tuple[float, float] | None] = []
 
         with torch.no_grad():
             for i in range(len(frames)):
@@ -140,6 +154,10 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]]) -> 
                 total_frames += 1
                 gt = truth[i] if i < len(truth) else None
                 gt_net = (gt[0] * sx, gt[1] * sy) if gt else None
+
+                if smooth_params:
+                    clip_raw.append(heatmap_to_centre(intensity, *SHIPPED))
+                    clip_gt.append(gt_net)
 
                 for v in variants:
                     n_out, n_ok, n_vis, errs = stats[v]
@@ -155,7 +173,41 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]]) -> 
                                 n_ok += 1
                     stats[v] = [n_out, n_ok, n_vis, errs]
 
-    return {"total": total_frames, "stats": stats}
+        for params in smooth_params or []:
+            if len(params) > 2 and params[2] == "seg":
+                # Smooth each free-flight span independently, splitting at the labelled
+                # contacts. A racket hit or bounce is an impulse: the ball's velocity
+                # changes discontinuously, so a constant-velocity smoother run across one
+                # blends the incoming and outgoing velocities and pulls the estimate away
+                # from the truth on both sides. Ground-truth contacts are used here to
+                # isolate that question, which makes this an upper bound rather than a
+                # deployable configuration.
+                smoothed = []
+                bounds = [0] + [c for c in contacts if 0 < c < len(clip_raw)] + [len(clip_raw)]
+                for a, b in zip(bounds, bounds[1:]):
+                    if b > a:
+                        smoothed.extend(rts_smooth(clip_raw[a:b],
+                                                   process_noise=params[0],
+                                                   measurement_noise=params[1]))
+            else:
+                smoothed = rts_smooth(clip_raw, process_noise=params[0],
+                                      measurement_noise=params[1])
+            n_out, n_ok, n_vis, errs = smooth_stats[params]
+            for i, gt_net in enumerate(clip_gt):
+                # The smoother emits a position on every frame, including frames the
+                # detector missed, which is the point of running it. Only frames with a
+                # labelled ball can be scored.
+                if gt_net is None:
+                    continue
+                n_vis += 1
+                n_out += 1
+                err = float(np.hypot(smoothed[i][0] - gt_net[0], smoothed[i][1] - gt_net[1]))
+                errs.append(err)
+                if err <= TOLERANCE_PX:
+                    n_ok += 1
+            smooth_stats[params] = [n_out, n_ok, n_vis, errs]
+
+    return {"total": total_frames, "stats": stats, "smooth": smooth_stats}
 
 
 def report(result: dict) -> None:
@@ -182,6 +234,29 @@ def report(result: dict) -> None:
     print("recall    = visible-ball frames located within tolerance")
     print("precision = of positions output, the fraction within tolerance")
 
+    if result.get("smooth"):
+        n_out0, n_ok0, n_vis0, errs0 = result["stats"][SHIPPED]
+        base_med = float(np.median(errs0)) if errs0 else float("nan")
+        base_rec = n_ok0 / n_vis0 if n_vis0 else 0.0
+        print(f"\n{'=' * 78}")
+        print("Forward-backward (RTS) smoothing of the raw trajectory")
+        print(f"{'=' * 78}")
+        print(f"{'proc noise':>11} {'meas noise':>11} {'coverage':>10} {'recall':>9} "
+              f"{'median err':>12} {'vs raw':>9}")
+        print("-" * 78)
+        print(f"{'-':>11} {'raw':>11} {(n_out0 / n_vis0 if n_vis0 else 0):>9.1%} "
+              f"{base_rec:>8.1%} {base_med:>11.1f}px {'baseline':>9}")
+        for params, (n_out, n_ok, n_vis, errs) in result["smooth"].items():
+            med = float(np.median(errs)) if errs else float("nan")
+            rec = n_ok / n_vis if n_vis else 0.0
+            delta = (med - base_med) / base_med * 100 if base_med else float("nan")
+            tag = " per-segment" if len(params) > 2 else ""
+            print(f"{params[0]:>11g} {params[1]:>11g} {(n_out / n_vis if n_vis else 0):>9.1%} "
+                  f"{rec:>8.1%} {med:>11.1f}px {delta:>+8.1f}%{tag}")
+        print("-" * 78)
+        print("coverage = share of visible-ball frames given a position at all. The")
+        print("smoother emits one on every frame, so it reaches 100% by construction.")
+
     # A single tolerance overstates or understates depending on where it sits relative to
     # the error distribution, so report the whole curve. 5px at 360x640 is roughly a ball
     # width; the same error is about 3x larger in pixels at 1080p, and what matters
@@ -207,6 +282,8 @@ def main():
     p.add_argument("--clips", type=int, default=10, help="clips to evaluate")
     p.add_argument("--max-frames", type=int, default=200, help="frames per clip cap")
     p.add_argument("--sweep", action="store_true", help="sweep postprocessing settings")
+    p.add_argument("--smooth", action="store_true",
+                   help="also measure forward-backward (RTS) smoothing of the trajectory")
     args = p.parse_args()
 
     if not Path(DATASET_ZIP).exists():
@@ -214,7 +291,13 @@ def main():
         sys.exit(1)
 
     variants = SWEEP if args.sweep else [SHIPPED]
-    report(evaluate(args.clips, args.max_frames, variants))
+    # (process_noise, measurement_noise). Spans "trust the measurements" to "trust the
+    # constant-velocity model", since which side wins is exactly what needs measuring.
+    smooth = [(1e-2, 1e-1), (1e-1, 1.0), (1.0, 1.0),
+              # Same settings, but smoothed per free-flight span instead of across
+              # the whole clip. Splits at ground-truth contacts.
+              (1e-2, 1e-1, "seg"), (1e-1, 1.0, "seg"), (1.0, 1.0, "seg")] if args.smooth else None
+    report(evaluate(args.clips, args.max_frames, variants, smooth))
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ Tennis-Vision/
 │                              #   small and committed)
 ├── notes/                    # CV concept write-ups (homography, Kalman filtering, SORT,
 │                              #   DeepSORT re-ID, temporal smoothing, shot detection)
-├── tests/                    # pytest unit + integration tests (161 passing)
+├── tests/                    # pytest unit + integration tests (170 passing)
 ├── tools/                    # label_shots.py - keyboard-driven contact/bounce labeling tool
 ├── trackers/                 # tracknet_ball_tracker.py (production), player_tracker.py,
 │                              #   ball_tracker.py (legacy YOLO ball tracker, superseded)

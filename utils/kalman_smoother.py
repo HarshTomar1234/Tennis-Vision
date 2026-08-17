@@ -171,3 +171,130 @@ def peak_speed_kmh_near_frame(
     if max_realistic_kmh is not None and kmh > max_realistic_kmh:
         return 0.0
     return kmh
+
+
+# ── Fixed-interval (Rauch-Tung-Striebel) smoothing ───────────────────────────
+#
+# The filter above is causal: at frame k it has only seen frames up to k. That is the
+# right constraint for live tracking and the wrong one here, because the whole video is
+# on disk before analysis starts. A gap in detections is the clearest case - a forward
+# filter entering one can only coast in a straight line at the last known velocity,
+# while the frames AFTER the gap say exactly where the ball came out.
+#
+# The RTS smoother adds a backward pass that redistributes that future information into
+# the past. It is the standard fixed-interval smoother for a linear Gaussian model and
+# it is exact for one: no extra tuning, no new dependency, ~40 lines.
+#
+# Implemented directly rather than through cv2.KalmanFilter because the recursion needs
+# the predicted covariance at each step (P_{k+1|k}), and driving OpenCV's filter while
+# harvesting its internals is both fragile and harder to read than the equations.
+#
+# NOT enabled in the pipeline, because measurement says it does not earn its place yet.
+# Against the TrackNet dataset's own labels (8 clips, 966 frames, via
+# eval/ball_localization_accuracy.py --smooth):
+#
+#     configuration                coverage   recall@5px   median err
+#     raw detections                  89.8%       36.9%        6.3px
+#     RTS across the whole clip      100.0%       38.1%        6.7px
+#     RTS per free-flight span       100.0%       38.4%        6.6px
+#
+# Two findings worth keeping.
+#
+# Smoothing ACROSS a contact is measurably worse than smoothing between contacts, at
+# every setting tried. A racket hit or bounce changes the velocity discontinuously, so a
+# constant-velocity smoother run through one blends the incoming and outgoing velocities
+# and pulls the estimate off the truth on both sides. Within the sweep, the least
+# aggressive setting always won, which is the same fact seen from another angle.
+#
+# But even applied per span it does not improve median error, and the reason is that
+# TrackNet's error is not Gaussian: median 5.8px against a 90th percentile of 19.4px is a
+# heavy tail of gross mislocalizations, usually the detector locking onto the wrong
+# object. A Kalman smoother assumes zero-mean Gaussian noise, so it spreads those
+# outliers into neighbouring good frames rather than rejecting them. The missing step is
+# an outlier gate before smoothing (a chi-square test on the innovation against the
+# predicted covariance), which would drop those measurements instead of averaging them in.
+# Until that exists, smoothing buys complete coverage and about 1.5 points of recall for
+# 4% worse median error, which is not a trade worth making by default.
+
+# Constant-velocity model, shared by the forward and backward passes.
+_A = np.array([[1.0, 0.0, 1.0, 0.0],
+               [0.0, 1.0, 0.0, 1.0],
+               [0.0, 0.0, 1.0, 0.0],
+               [0.0, 0.0, 0.0, 1.0]])
+_H = np.array([[1.0, 0.0, 0.0, 0.0],
+               [0.0, 1.0, 0.0, 0.0]])
+
+
+def rts_smooth(
+    measurements: list[tuple[float, float] | None],
+    process_noise: float = 1e-2,
+    measurement_noise: float = 1e-1,
+) -> list[tuple[float, float, float, float]]:
+    """
+    Forward-backward smooth a 2-D trajectory that may have gaps.
+
+    Args:
+        measurements:       per-frame (x, y), or None where nothing was detected. Gaps are
+                            handled by predicting through them, so the smoothed result is
+                            informed by the frames on BOTH sides of a gap.
+        process_noise:      how much the constant-velocity assumption is trusted. Larger
+                            follows the measurements more closely.
+        measurement_noise:  assumed detector error. Larger smooths harder.
+
+    Returns:
+        One (x, y, vx, vy) per input frame, including for frames that had no measurement.
+        Returns an empty list for empty input, and passes a single measurement through
+        with zero velocity (a smoother needs at least two frames to say anything).
+    """
+    n = len(measurements)
+    if n == 0:
+        return []
+
+    Q = np.eye(4) * float(process_noise)
+    R = np.eye(2) * float(measurement_noise)
+
+    # Start from the first real measurement, at rest. Without a real starting point the
+    # filter spends the first frames dragging itself in from the origin.
+    first = next((m for m in measurements if m is not None), None)
+    if first is None:
+        return [(0.0, 0.0, 0.0, 0.0)] * n
+
+    x = np.array([first[0], first[1], 0.0, 0.0])
+    P = np.eye(4) * 1e3          # near-total ignorance about the initial velocity
+
+    # ── forward pass, keeping what the backward pass needs ──────────────────
+    x_filt, P_filt, x_pred, P_pred = [], [], [], []
+    for z in measurements:
+        xp = _A @ x
+        Pp = _A @ P @ _A.T + Q
+        x_pred.append(xp)
+        P_pred.append(Pp)
+
+        if z is None:
+            # No measurement: the prediction IS the estimate, and the covariance grows.
+            x, P = xp, Pp
+        else:
+            S = _H @ Pp @ _H.T + R
+            K = Pp @ _H.T @ np.linalg.inv(S)
+            x = xp + K @ (np.asarray(z, dtype=float) - _H @ xp)
+            P = Pp - K @ _H @ Pp
+
+        x_filt.append(x)
+        P_filt.append(P)
+
+    # ── backward pass ───────────────────────────────────────────────────────
+    # The last frame has no future to learn from, so it starts as the filtered estimate
+    # and every earlier frame is corrected towards what the frames after it implied.
+    xs = [None] * n
+    Ps = [None] * n
+    xs[-1], Ps[-1] = x_filt[-1], P_filt[-1]
+
+    for k in range(n - 2, -1, -1):
+        # Gain of the smoother: how much the next frame's correction propagates back.
+        # pinv rather than inv because a long detection gap can leave P_pred
+        # ill-conditioned, and a LinAlgError here would lose the whole trajectory.
+        C = P_filt[k] @ _A.T @ np.linalg.pinv(P_pred[k + 1])
+        xs[k] = x_filt[k] + C @ (xs[k + 1] - x_pred[k + 1])
+        Ps[k] = P_filt[k] + C @ (Ps[k + 1] - P_pred[k + 1]) @ C.T
+
+    return [(float(s[0]), float(s[1]), float(s[2]), float(s[3])) for s in xs]
