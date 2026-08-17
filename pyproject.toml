@@ -35,6 +35,11 @@ dependencies = [
     "mediapipe>=0.10",
     "huggingface-hub>=0.20",
     "gdown>=4.7",
+    # Required by ultralytics' tracking mode, which PlayerTracker uses. Absent from this
+    # list until now, so `pip install tennis-vision` produced an install that crashed on
+    # the first tracked frame while `pip install -r requirements.txt` worked.
+    "supervision>=0.27",
+    "lapx>=0.5.2",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +62,9 @@ tennis-vision = "cli:main"
 # wheel never silently picks up datasets/, output/ or notes/.
 packages = [
     "constants",
+    # Ships models/hit_bounce_classifier.json. See models/__init__.py for why only the
+    # small weights are packaged.
+    "models",
     "court_line_detector",
     "mini_visual_court",
     "trackers",
@@ -65,6 +73,9 @@ packages = [
 py-modules = ["main", "cli"]
 
 [tool.setuptools.package-data]
+# Restricted to the small trained weights and any config carried by a package. The large
+# model files in models/ (*.pth, *.pt, *.task) are deliberately excluded: they are
+# downloaded at runtime, and two of them are not ours to redistribute.
 "*" = ["*.yaml", "*.json"]
 
 [tool.pytest.ini_options]

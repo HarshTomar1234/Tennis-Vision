@@ -44,7 +44,14 @@ from .ball_state import CONTACT, BOUNCE
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WEIGHTS_PATH = "models/hit_bounce_classifier.json"
+# Resolved from this file's location, not the working directory. As a bare relative path
+# it only worked when the process happened to be started from the repo root: run from
+# anywhere else, or installed as a wheel, the weights were "not found", the classifier
+# returned None for every event, and the pipeline fell back to the player-proximity
+# heuristic without anything in the output saying so.
+DEFAULT_WEIGHTS_PATH = str(
+    Path(__file__).resolve().parent.parent / "models" / "hit_bounce_classifier.json"
+)
 EVENT_WINDOW = 4   # frames before/after the event used to compute velocity - must match
                     # the WINDOW constant in eval/explore_hit_bounce_features.py, since
                     # the trained weights assume this exact window size.

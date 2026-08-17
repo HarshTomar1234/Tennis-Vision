@@ -111,17 +111,30 @@ def _positive_int(value: str) -> int:
     return n
 
 
+# These must stay in sync with configs/config.yaml. They are not a minimal fallback:
+# they are what runs when no YAML is present, which is the case for anyone who installed
+# the wheel rather than cloning. When they drifted from config.yaml the result was a
+# silently degraded pipeline for exactly those users - the superseded court model
+# (median 4.03px against 2.90px, 4 of 9 clips passing against 8), the YOLO ball detector
+# instead of TrackNet, and no pose-based shot classification. Nothing errored and nothing
+# in the output said the run was worse than the README's measured numbers.
 _DEFAULTS: dict = {
     "pipeline": {
         "per_frame_keypoints": True,
         "use_bytetrack": True,
         "shot_classification": True,
         "use_homography": True,
+        "use_tracknet": True,
+        "use_pose_shots": True,
     },
     "models": {
         "player": "yolov8x",
         "ball": "models/last.pt",
-        "court": "models/keypoints_model.pth",
+        # The geometrically fine-tuned weights, which is what scripts/download_models.py
+        # fetches. models/keypoints_model.pth is the superseded original.
+        "court": "models/keypoints_model_geoaug.pth",
+        "tracknet": "models/tracknet.pt",
+        "pose": "models/pose_landmarker_lite.task",
     },
     "io": {
         "input_video": "input_videos/input_video_2.mp4",
@@ -132,14 +145,20 @@ _DEFAULTS: dict = {
         "player_stub_path": "tracker_stubs/player_detections.pkl",
         "ball_stub_bytetrack_path": "tracker_stubs/ball_detections_tracked.pkl",
         "ball_stub_path": "tracker_stubs/ball_detections.pkl",
+        "tracknet_stub_path": "tracker_stubs/ball_detections_tracknet.pkl",
     },
     "stubs": {
-        "use_player_stubs": True,
+        # Off, matching configs/config.yaml and the README. A stub is one video's cached
+        # detections; the paths are keyed per clip now, but caching still hides genuine
+        # detector changes behind stale results, so a first run should always be real.
+        # configs/dev.yaml turns these on for repeated runs on one clip.
+        "use_player_stubs": False,
         "use_ball_stubs": False,
     },
     "detection": {
         "player_confidence": 0.7,
         "ball_confidence": 0.6,
+        "shot_player_distance_px": 300,
     },
     "shot_classifier": {
         "volley_distance_threshold": 40,
