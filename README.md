@@ -24,7 +24,7 @@ Two examples from this repository:
   hand-labelled ground truth, only **42.5%** of visible-ball frames are located within
   5px. Both numbers are true and they measure different things.
 - Contact and bounce detection scores **87.6% recall given perfect ball positions** and
-  **51.3% running real detection end to end**. The second one is what you actually get.
+  **72.0% running real detection end to end**. The second one is what you actually get.
 
 Every figure below names the script that produced it.
 
@@ -120,8 +120,12 @@ Against the original TrackNet dataset's own hand-labelled coordinates, 16 clips.
 Detection rate and accuracy are not the same measurement, and the gap here is large. The
 detector reliably finds roughly where the ball is and is not pixel-precise. That is
 adequate for trajectory shape, bounce timing and speed across a flight. It is marginal for
-exact landing coordinates, and it is the current ceiling on everything derived from ball
-position.
+exact landing coordinates.
+
+It is worth being precise about what this does and does not cost. It bounds the accuracy of
+speeds, 3-D reconstruction and landing positions. It does **not** cost event recall: the
+funnel below shows every labelled contact has a detected ball near it, so nothing is missed
+for want of a detection.
 
 ### Contact and bounce event detection
 
@@ -140,15 +144,44 @@ behaviour. 91 clips.
 **Running real detection end to end**, which is what the pipeline does. 10 clips, 76
 labelled contacts, trajectory classifier only.
 
-| Postprocessing | Recall | Precision | F1 | Mean offset | Script |
-|---|---|---|---|---|---|
-| mean of all responding pixels (previous) | 48.7% | 92.5% | 0.638 | 3.6 frames | `eval/event_detection_on_real_detections.py` (dataset) |
-| **largest connected component** (shipped) | **51.3%** | **92.9%** | **0.661** | **3.2 frames** | same |
+| Configuration | Recall | Precision | F1 | Mean offset |
+|---|---|---|---|---|
+| mean of all heatmap pixels, chained clustering | 48.7% | 92.5% | 0.638 | 3.6 frames |
+| largest connected component, chained clustering | 51.3% | 92.9% | 0.661 | 3.2 frames |
+| **largest connected component, bounded clustering** (shipped) | **68.4%** | **92.9%** | **0.788** | **2.4 frames** |
 
-Recall on real detections is roughly half the upper bound. Precision holds up, so the
-events reported are overwhelmingly real, but about half the contacts in a rally are missed.
-The cause is ball-detection noise rather than the candidate generators: a 5.4px median
-localization error both manufactures reversals and buries real ones.
+Script: `eval/event_detection_on_real_detections.py` (dataset). Rows above are the same 10
+clips throughout so the comparison is controlled.
+
+On a wider 25-clip sample, 164 labelled contacts:
+
+| Metric | Result |
+|---|---|
+| Recall | **72.0%** |
+| Precision | **95.9%** |
+| F1 | **0.822** |
+| Mean offset | 2.4 frames |
+| Per-clip recall | min 50%, median 71%, max 100% |
+| Clips below 40% recall | **0 of 25** |
+
+The per-clip row matters more than the aggregate. A 72% mean could hide clips that fail
+completely, and it does not: the worst clip in the sample still recovers half its contacts,
+and none scores zero.
+
+Where the remaining misses go, attributed by `eval/event_recall_funnel.py` across 12 clips
+and 91 labelled contacts:
+
+| Stage | Share of all contacts |
+|---|---|
+| reported | 68.1% |
+| ball never detected nearby | **0.0%** |
+| no candidate proposed | 15.4% |
+| lost in candidate merging | 16.5% |
+| rejected by the classifier | **0.0%** |
+
+Detection reaches every labelled contact and the classifier discards none. Everything still
+missing is lost in candidate generation or in merging, which is the opposite of what this
+project assumed before the funnel existed.
 
 ### Hit versus bounce classification
 
@@ -219,7 +252,7 @@ and on precision they disagree with this clip.
 
 ### Test suite
 
-**176 unit and integration tests** (`pytest tests/`), covering ball-state classification,
+**177 unit and integration tests** (`pytest tests/`), covering ball-state classification,
 Kalman and RTS smoothing including the physical speed-plausibility gate, mini-court
 coordinate mapping, trajectory drawing, pose-based shot classification, the hit and bounce
 classifier and its feature contract, TrackNet postprocessing geometry, detection-cache
@@ -280,9 +313,9 @@ recognised.
 - **Rally and groundstroke speeds are unvalidated.** 3-D reconstruction produces 29 to 112
   km/h with a mean of 67, and the physics is verified, but no ground truth exists for
   non-serve shots. Serve speed is validated; rally speed is not.
-- **About half the contacts in a rally are missed** (51.3% recall on real detections).
-  Reported events are overwhelmingly real, so the shot count is an under-count rather than
-  noise.
+- **Roughly a quarter to a third of contacts in a rally are missed** (72.0% recall on real
+  detections, 95.9% precision). Reported events are overwhelmingly real, so the shot count
+  is an under-count rather than noise.
 - **Volley and smash labels come from position rules with no ground truth.** Serve is now
   detected from physical evidence. Those two are not.
 - **The learned temporal shot classifier is not wired into the pipeline.** It scores 73.4%
@@ -303,32 +336,38 @@ recognised.
 
 Ordered by measured value, not by interest.
 
-1. **Ball localization.** Everything derived from ball position is capped by a 5.4px median
-   error with an 18.0px tail. This is the single highest-value target, and every other
-   event-derived number improves with it.
-2. **Multi-candidate heatmap extraction.** Extract every distinct response per frame
-   instead of one, which is the prerequisite for gated association. The gate experiment
-   above failed specifically because there was nothing to choose between.
-3. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
+1. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
+   loses 16.5% of contacts, which are real events genuinely closer together than the
+   window. Two candidates should merge because the trajectory says they describe one
+   physical event, not because they are near each other in time. This is the largest
+   remaining bucket.
+2. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
+   three generators, so they are blind to some event shape. Finding out which is a
+   labelling exercise, not a modelling one.
+3. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
+   funnel shows it costs zero recall: every labelled contact has a detected ball nearby.
+   It still bounds the accuracy of speeds, 3-D reconstruction and landing positions, which
+   is why it stays on the list.
+4. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
    transients that a broadcast mix carries clearly. Audio cannot say where the ball is, but
    it says precisely when it was struck, including while the ball is hidden behind a player
-   or the net. This is the most promising route to the missing half of the contacts.
-4. **Player-height-normalised contact distance.** The current threshold is a raw pixel
+   or the net. It is the most promising route to the contacts no generator proposes.
+5. **Player-height-normalised contact distance.** The current threshold is a raw pixel
    constant, which is wrong at different resolutions and at different depths within a single
    frame. Dividing by the player's own pixel height converts pixels to metres at that
    player's depth without needing to know the ball's height.
-5. **Geometric court detection.** The four cross-court lines have a projective-invariant
+6. **Geometric court detection.** The four cross-court lines have a projective-invariant
    cross-ratio that is identical under any camera view, so a court can be found by searching
    for that signature rather than by a learned model. This would remove the per-surface
    fine-tuning dependency entirely.
-6. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
+7. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
    and wired in, or dropped.
 
 ## Reproducing the numbers
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/                                       # 176 tests
+pytest tests/                                       # 177 tests
 
 python eval/shot_frame_accuracy.py                  # reference clip, ships with repo
 python eval/speed_accuracy.py                       # reference clip, ships with repo
@@ -350,7 +389,7 @@ mini_visual_court/    mini-court mapping and trajectory drawing
 models/               small trained weights (committed); large weights fetched by script
 notes/                CV concept write-ups
 scripts/              download_models.py, build_clip_suite.py
-tests/                176 unit and integration tests
+tests/                177 unit and integration tests
 tools/                label_shots.py, keyboard-driven contact and bounce labelling
 trackers/             tracknet_ball_tracker.py, player_tracker.py
 training/             court keypoint and shot classifier training
