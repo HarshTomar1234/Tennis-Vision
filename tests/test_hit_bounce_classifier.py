@@ -9,6 +9,9 @@ import json
 import os
 import sys
 import tempfile
+from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -133,7 +136,10 @@ def test_real_model_classifies_unambiguous_hit():
     if not os.path.exists(REAL_WEIGHTS):
         return   # not trained in this environment - skip rather than fail the suite
     result = classify_hit_or_bounce(
-        {"height_y": 250.0, "vy_change_mag": 20.0, "vx_change_mag": 40.0}
+        # vx_sign_flip=1: a 40px/frame horizontal redirect is a racket reversing the
+        # ball, which is the profile 71.8% of real hits show.
+        {"height_y": 250.0, "vy_change_mag": 20.0, "vx_change_mag": 40.0,
+         "vx_sign_flip": 1.0}
     )
     assert result is not None
     assert result[0] == CONTACT
@@ -145,7 +151,43 @@ def test_real_model_classifies_unambiguous_bounce():
     if not os.path.exists(REAL_WEIGHTS):
         return
     result = classify_hit_or_bounce(
-        {"height_y": 330.0, "vy_change_mag": 18.0, "vx_change_mag": 0.5}
+        # vx_sign_flip=0: the floor preserves horizontal direction, which is why only
+        # 2.1% of real bounces flip it.
+        {"height_y": 330.0, "vy_change_mag": 18.0, "vx_change_mag": 0.5,
+         "vx_sign_flip": 0.0}
     )
     assert result is not None
     assert result[0] == BOUNCE
+
+
+def test_computed_features_cover_everything_the_weights_expect():
+    """
+    compute_event_features() must produce every feature the trained model consumes.
+
+    These two drifted apart when the model gained a feature the inference path did not
+    compute, and the symptom was a bare KeyError from deep inside classification. This
+    fails loudly at the contract instead, and catches the more dangerous direction too:
+    a retrain that adds a feature nobody wired into the pipeline.
+    """
+    import json
+
+    if not os.path.exists(REAL_WEIGHTS):
+        return
+
+    # A straightforward descending-then-ascending trajectory: enough clean context on
+    # both sides for every velocity feature to be computable.
+    positions = [(float(x), float(100 + abs(x - 10) * 5)) for x in range(20)]
+    features = compute_event_features(positions, event_frame=10)
+    assert features is not None
+
+    expected = json.loads(Path(REAL_WEIGHTS).read_text())["feature_names"]
+    missing = [name for name in expected if name not in features]
+    assert not missing, f"compute_event_features is missing trained features: {missing}"
+
+
+def test_missing_feature_raises_a_diagnosable_error():
+    """A features/weights mismatch is a bug, and must not be silently defaulted to 0."""
+    if not os.path.exists(REAL_WEIGHTS):
+        return
+    with pytest.raises(ValueError, match="out of sync"):
+        classify_hit_or_bounce({"height_y": 250.0})

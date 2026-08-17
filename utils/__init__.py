@@ -1,4 +1,4 @@
-from .video_utils import read_video, save_video
+from .video_utils import read_video, save_video, stub_path_for_video, stub_matches_frames
 from .bbox_utils import get_center_of_bbox, measure_distance_between_points, get_foot_position, get_closest_keypoint_index, get_height_of_bbox, measure_xy_distance, get_center_of_bbox
 from .conversions import convert_pixel_distance_to_meters, convert_meters_to_pixel_distance
 from .player_stats_drawer_utils import draw_player_stats
@@ -24,6 +24,7 @@ from .hit_bounce_classifier import (
     classify_reversals_by_trajectory,
     detect_xvelocity_candidates,
     merge_nearby_candidates,
+    derive_shot_frames,
 )
 from .ui_layout_manager import UILayoutManager, create_layout_for_frame
 from .court_validity import assess_court_fit, line_support_score, MIN_LINE_SUPPORT

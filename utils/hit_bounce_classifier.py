@@ -18,11 +18,17 @@ investigating that, feature exploration on the real 1,034-event TrackNet ground 
   can reverse or sharply change x-direction (cross-court shots, returns). Measured: hits
   flip x-direction 71.8% of the time, bounces only 2.1% of the time.
 
-A 3-feature logistic regression (height, |vertical-velocity change|, |horizontal-velocity
-change|) trained on that data reaches 84.1% held-out accuracy on clip-level split (not
-event-level, which would leak camera/lighting/player correlations) - see
-eval/train_hit_bounce_classifier.py for the full methodology and eval/journal 0012 for
-the honest numbers.
+A 4-feature logistic regression (height, |vertical-velocity change|, |horizontal-velocity
+change|, and whether x-direction flipped) trained on that data reaches 86.4% held-out
+accuracy on a clip-level split (not event-level, which would leak camera/lighting/player
+correlations) - see eval/train_hit_bounce_classifier.py for the full methodology and
+eval/journal 0012 for the honest numbers.
+
+That feature set was chosen on end-to-end shot F1, not on this accuracy. A six-feature
+variant scores higher here (89.3%) and measurably worse in the pipeline (rally F1 0.600
+against 0.824), because the extra features are raw signed velocities that are clean in
+the hand-annotated training data and noisy in real TrackNet detections. The comment above
+FEATURE_NAMES in the training script has the full table.
 
 This is trajectory-only and needs no player detection, so it works even when player
 tracking is unavailable, and combines naturally with the proximity heuristic where player
@@ -79,8 +85,8 @@ def compute_event_features(
         window:    frames of context required on each side (default matches training).
 
     Returns:
-        {"height_y", "vy_change_mag", "vx_change_mag"}, or None if there isn't enough
-        clean position data around this frame to compute velocity on both sides.
+        The six trained features, or None if there isn't enough clean position data
+        around this frame to compute velocity on both sides.
     """
     if event_frame < 0 or event_frame >= len(positions) or positions[event_frame] is None:
         return None
@@ -95,10 +101,23 @@ def compute_event_features(
     vx_after  = (after[-1][0] - after[0][0]) / (len(after) - 1)
     vy_after  = (after[-1][1] - after[0][1]) / (len(after) - 1)
 
+    # These must match eval/explore_hit_bounce_features.py exactly, including the
+    # convention below: the trained weights assume this encoding, and a mismatch here
+    # would be silent - the model would still return confident probabilities from
+    # features that no longer mean what it learned.
     return {
         "height_y": positions[event_frame][1],
         "vy_change_mag": abs(vy_after - vy_before),
+        "vy_before": vy_before,
+        "vy_after": vy_after,
         "vx_change_mag": abs(vx_after - vx_before),
+        # 1 when the ball reversed horizontally, which is a racket redirecting it
+        # (71.8% of hits, 2.1% of bounces). Below 0.5 px/frame the direction is noise
+        # rather than motion, so it is reported as "no flip" - the same collapse
+        # training applies when this feature is absent.
+        "vx_sign_flip": float(
+            abs(vx_before) > 0.5 and abs(vx_after) > 0.5 and (vx_before > 0) != (vx_after > 0)
+        ),
     }
 
 
@@ -124,6 +143,19 @@ def classify_hit_or_bounce(
     weights = _load_weights(weights_path)
     if weights is None:
         return None
+
+    # A feature the weights were trained on but the caller did not compute is a bug in
+    # this file, not a runtime condition: it means compute_event_features and the trained
+    # model have drifted apart. Say so, rather than raising a bare KeyError - and never
+    # default it to 0, which would keep returning confident probabilities from an input
+    # the model never saw.
+    absent = [n for n in weights["feature_names"] if n not in features]
+    if absent:
+        raise ValueError(
+            f"trained weights expect {weights['feature_names']} but these were not "
+            f"computed: {absent}. compute_event_features() and the weights in "
+            f"{weights_path} are out of sync - retrain, or update the feature computation."
+        )
 
     x = [features[name] for name in weights["feature_names"]]
     mu, sigma, w, b = weights["mu"], weights["sigma"], weights["w"], weights["b"]
@@ -279,3 +311,65 @@ def classify_reversals_by_trajectory(
         (contacts if result[0] == CONTACT else bounces).append(frame)
 
     return contacts, bounces
+
+
+def derive_shot_frames(
+    ball_tracker,
+    ball_detections: list[dict],
+    player_detections: list[dict],
+    shot_player_distance_px: int = 300,
+):
+    """
+    Turn ball detections into the pipeline's confirmed shot and bounce frames.
+
+    This exists so the evals grade what the product actually reports. They previously
+    stopped at the raw candidate union - the output of the three generators before any
+    contact-vs-bounce classification - and scored that as if it were the shot list. On
+    the reference clip that union is 25 candidates against 7 real shots, so the eval
+    published 28% precision for a stage the pipeline never emits: every bounce in the
+    rally was being counted as a false-positive shot. `eval/_ball_source.py` had already
+    aligned the *detections* between eval and pipeline; this closes the same gap for
+    event derivation, which is where the shot numbers actually come from.
+
+    Three generators feed the union because each is blind to a different event shape:
+    y-reversal and x-velocity are hit-shaped by construction (x-velocity recalls only
+    12% of bounces), while the bounce generator recalls 83.9%. Merging is what stops
+    two generators firing on one real event and inflating the count.
+
+    Args:
+        ball_tracker:             supplies `get_ball_shot_frames` (the y-reversal generator).
+        ball_detections:          per-frame {ball_id: bbox}, already interpolated.
+        player_detections:        per-frame {player_id: bbox}, for the proximity fallback.
+        shot_player_distance_px:  proximity threshold for the fallback classifier.
+
+    Returns:
+        (shot_frames, bounce_frames, raw_reversal_frames), each sorted.
+    """
+    from .ball_state import classify_contact_vs_bounce
+    from .bounce_candidates import detect_bounce_candidates
+
+    raw_reversals = merge_nearby_candidates(sorted(
+        set(ball_tracker.get_ball_shot_frames(ball_detections))
+        | set(detect_xvelocity_candidates(ball_detections))
+        | set(detect_bounce_candidates(ball_detections))
+    ))
+
+    traj_contacts, traj_bounces = classify_reversals_by_trajectory(
+        raw_reversals, ball_detections
+    )
+    classified = set(traj_contacts) | set(traj_bounces)
+
+    # Reversals the trajectory model cannot decide on (too little context, e.g. near a
+    # clip boundary) fall back to player proximity rather than being silently dropped.
+    unclassified = [f for f in raw_reversals if f not in classified]
+    if unclassified:
+        prox_contacts, prox_bounces = classify_contact_vs_bounce(
+            unclassified, ball_detections, player_detections,
+            shot_player_distance_px=shot_player_distance_px,
+        )
+    else:
+        prox_contacts, prox_bounces = [], []
+
+    return (sorted(traj_contacts + prox_contacts),
+            sorted(traj_bounces + prox_bounces),
+            raw_reversals)

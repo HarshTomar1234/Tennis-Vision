@@ -69,6 +69,18 @@ def extract_features(zf: zipfile.ZipFile, label_path: str) -> list[dict]:
             "label": "hit" if r["status"] == "1" else "bounce",
             "height_y": positions[i][1],
             "vy_change_mag": abs(vy_after - vy_before),
+            # Signed vertical velocity. `vy_change_mag` above is an absolute value, so
+            # it is equally large for a hard bounce and a hard hit and cannot separate
+            # them; these keep the information it discards.
+            #
+            # Note what this is NOT: the obvious "a bounce descends then ascends" rule
+            # does not hold in this data - 53.5% of bounces show it and so do 51.0% of
+            # hits, which is no signal at all. The gain is from the two velocities as
+            # continuous features, not from their sign pattern. Measured over 30
+            # clip-grouped splits, adding them moves accuracy 84.1% to 86.8%, and with
+            # vx_sign_flip to 89.4%.
+            "vy_before": vy_before,
+            "vy_after": vy_after,
             "vx_before": vx_before,
             "vx_after": vx_after,
             "vx_change_mag": abs(vx_after - vx_before),

@@ -52,7 +52,8 @@ Add `--max-frames 60` for a quick check before committing to a full run.
   (body-relative geometry: does the hitting arm cross the shoulder midline in the
   horizontal plane, so it's handedness-, facing-, and side-on-agnostic)
 - **Hit vs. Bounce Classification** - trained logistic regression on ball-trajectory
-  shape (height, vertical/horizontal velocity change), no player position needed
+  shape (height, vertical/horizontal velocity change, horizontal direction reversal),
+  no player position needed
 - **Mini Court Visualization** - bird's-eye view with real ball trajectory trail
 - **Real Perspective Homography** - `cv2.findHomography`, not nearest-keypoint approximation
 
@@ -72,7 +73,7 @@ Tennis-Vision/
 │                              #   small and committed)
 ├── notes/                    # CV concept write-ups (homography, Kalman filtering, SORT,
 │                              #   DeepSORT re-ID, temporal smoothing, shot detection)
-├── tests/                    # pytest unit + integration tests (146 passing)
+├── tests/                    # pytest unit + integration tests (156 passing)
 ├── tools/                    # label_shots.py - keyboard-driven contact/bounce labeling tool
 ├── trackers/                 # tracknet_ball_tracker.py (production), player_tracker.py,
 │                              #   ball_tracker.py (legacy YOLO ball tracker, superseded)
@@ -150,12 +151,19 @@ still-moving numbers on an active sprint branch, not final claims.
 | Metric | Result | Script |
 |---|---|---|
 | Raw ball detection rate (TrackNet) | 82.5% (470/570 frames) | pipeline log |
-| Shot-frame accuracy | 7/7 matched, mean offset 4.9 frames - EXCELLENT | `eval/shot_frame_accuracy.py` |
+| Shot-frame recall | 7/7 shots found, mean offset 10.1 frames | `eval/shot_frame_accuracy.py` |
+| Shot-frame precision | 70.0% (3 false positives in 10 reported shots), F1 0.82 | `eval/shot_frame_accuracy.py` |
 | Ball speed *plausibility* (a range check, **not** accuracy) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 | Player speed *plausibility* (range check) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 
 > ⚠️ Those two rows check that speeds are *physically possible*, not that they are
 > *correct*. Rally speeds are currently **systematically low** - see Limitations.
+
+> ⚠️ Shot detection finds every real shot but still over-reports: 10 shots for a rally
+> that contains 7. The extra 3 are bounces the contact-vs-bounce classifier lets
+> through. Treat the shot **count** as an upper bound. Recall is the number to trust
+> here, not precision. Measured on one clip with 7 labelled shots, so it is directional
+> rather than precise.
 
 ### Contact/bounce event detection, at real dataset scale (91 clips, TrackNet's own
 training data - same lineage as `models/tracknet.pt`, not a foreign benchmark)
@@ -168,11 +176,17 @@ training data - same lineage as `models/tracknet.pt`, not a foreign benchmark)
 
 ### Hit vs. bounce classification
 
-Trajectory-only logistic regression (ball height, vertical/horizontal velocity change),
-no player position needed - 84.1% held-out accuracy, trained on 820 events / tested on
-214 held-out events (clip-level split, not event-level, to avoid leaking
-camera/lighting/player correlations). See `models/hit_bounce_classifier.json` and
-`eval/train_hit_bounce_classifier.py`.
+Trajectory-only logistic regression (ball height, vertical/horizontal velocity change,
+and whether the ball reversed horizontally), no player position needed - 86.4% held-out
+accuracy, trained on 820 events / tested on 214 held-out events (clip-level split, not
+event-level, to avoid leaking camera/lighting/player correlations). See
+`models/hit_bounce_classifier.json` and `eval/train_hit_bounce_classifier.py`.
+
+The feature set was chosen on end-to-end shot F1, not on this accuracy, and the two
+disagree. A six-feature variant adding raw signed velocities scores higher here (89.3%)
+and clearly worse in the pipeline (rally F1 0.600 against 0.824), because those features
+are clean in the hand-annotated training data and noisy in real TrackNet detections. The
+full comparison table is in the training script.
 
 ### Pose-based shot classification
 

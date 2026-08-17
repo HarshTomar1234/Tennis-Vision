@@ -37,6 +37,7 @@ from utils import (
     classify_forehand_backhand,
     classify_reversals_by_trajectory,
     convert_pixel_distance_to_meters,
+    derive_shot_frames,
     detect_xvelocity_candidates,
     draw_player_stats,
     draw_shot_classifications,
@@ -46,6 +47,8 @@ from utils import (
     read_video,
     save_video,
     smooth_trajectories,
+    stub_matches_frames,
+    stub_path_for_video,
 )
 from utils.bounce_candidates import detect_bounce_candidates
 from utils.calibration_banner import draw_calibration_warning
@@ -349,12 +352,15 @@ def main():
     logger.info("[2/9] Player detection...")
     player_tracker = PlayerTracker(model_path=cfg["models"]["player"])
     use_player_stubs = cfg["stubs"]["use_player_stubs"]
+    # Keyed to this clip for the same reason as the ball stub below: a shared cache
+    # handed one video's player boxes to another.
+    player_stub = stub_path_for_video(cfg["io"]["player_stub_path"], input_path)
     player_detections = player_tracker.detect_frames(
         video_frames,
         read_from_stub=use_player_stubs,
-        stub_path=cfg["io"]["player_stub_path"],
+        stub_path=player_stub,
     )
-    source = f"stub ({cfg['io']['player_stub_path']})" if use_player_stubs else "fresh YOLO"
+    source = f"stub ({player_stub})" if use_player_stubs else "fresh YOLO"
     logger.info(f"  Source: {source}")
 
     # ── 3. Ball detection ──────────────────────────────────────────
@@ -367,13 +373,28 @@ def main():
         ball_tracker = TrackNetBallTracker(
             model_path=cfg["models"].get("tracknet", "models/tracknet.pt")
         )
-        tracknet_stub = cfg["io"].get("tracknet_stub_path", "tracker_stubs/ball_detections_tracknet.pkl")
+        # Keyed to this clip: a shared stub silently fed one video's ball positions to
+        # another. See utils.video_utils.stub_path_for_video.
+        tracknet_stub = stub_path_for_video(
+            cfg["io"].get("tracknet_stub_path", "tracker_stubs/ball_detections_tracknet.pkl"),
+            input_path,
+        )
         use_ball_stubs = cfg["stubs"].get("use_ball_stubs", False)
 
+        cached = None
         if use_ball_stubs and Path(tracknet_stub).exists():
-            logger.info(f"  TrackNet v2 - loading from stub ({tracknet_stub})")
             with open(tracknet_stub, "rb") as f:
-                ball_detections = pickle.load(f)
+                cached = pickle.load(f)
+            if not stub_matches_frames(cached, video_frames):
+                logger.warning(
+                    f"  Stub {tracknet_stub} has {len(cached)} frames but this clip has "
+                    f"{len(video_frames)}; ignoring it and detecting fresh"
+                )
+                cached = None
+
+        if cached is not None:
+            logger.info(f"  TrackNet v2 - loading from stub ({tracknet_stub})")
+            ball_detections = cached
         else:
             logger.info("  TrackNet v2 (temporal heatmap, 3-frame context)")
             ball_detections = ball_tracker.detect_frames(video_frames)
@@ -474,25 +495,13 @@ def main():
 
     # ── 7. Shot frames + coordinate mapping ───────────────────────
     logger.info("[7/9] Detecting shot frames + mapping to mini-court...")
-    # Union of two candidate signals: y-reversal (vertical trajectory flip) and
-    # x-velocity-change (horizontal redirect) - neither alone catches every real
-    # contact/bounce. Verified at dataset scale (91 clips) after full classification:
-    # recall 75.8%→87.6%, precision 88.9%→90.3% vs y-reversal alone. See
-    # docs/journal/0015 and utils.hit_bounce_classifier.detect_xvelocity_candidates.
-    yrev_frames = ball_tracker.get_ball_shot_frames(ball_detections)
-    xvel_frames = detect_xvelocity_candidates(ball_detections)
-    # Third source, added 2026-08-09: a dedicated BOUNCE generator. The other two are
-    # hit-shaped by construction - measured on the full 95-clip labelled dataset,
-    # x-velocity recalls only 12.0% of real bounces (it looks for the horizontal
-    # reversal that defines a racket strike) while this one recalls 83.9%. Without it
-    # the serve's landing was routinely never proposed, so serve speed paired the
-    # contact with a later rally event. See eval/bounce_candidate_recall.py.
-    bounce_frames_raw = detect_bounce_candidates(ball_detections)
-    # The generators can each fire within a few frames of the same real event with
-    # no knowledge of each other, inflating apparent shot count and making per-frame
-    # work (pose) sensitive to which nearby duplicate gets checked. See docs/journal/0018.
-    raw_reversal_frames = merge_nearby_candidates(
-        sorted(set(yrev_frames) | set(xvel_frames) | set(bounce_frames_raw))
+    # Candidate generation, merging and the contact-vs-bounce split all live in
+    # utils.hit_bounce_classifier.derive_shot_frames so the evals grade this exact
+    # logic rather than a re-implementation of it. See that function for why three
+    # generators are needed and what each one is blind to.
+    shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
+    confirmed_shot_frames, bounce_frames, raw_reversal_frames = derive_shot_frames(
+        ball_tracker, ball_detections, player_detections, shot_dist_px
     )
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
@@ -503,43 +512,10 @@ def main():
     # is NOT needed for this part.
     floor_states = classify_floor_level(raw_reversal_frames, len(video_frames))
 
-    # CONTACT vs BOUNCE split for shot counting / stats only - geometry above doesn't
-    # need this (every reversal is a valid floor anchor either way).
-    #
-    # Primary: trajectory-shape classifier (utils.hit_bounce_classifier), trained on
-    # 1,034 real events from the original TrackNet dataset - 84.1% held-out accuracy,
-    # and on this project's own reference clip it recovered the exact real shot count
-    # (7) where the player-proximity heuristic below topped out around 19-20. See
-    # docs/journal/0012.
-    #
-    # Fallback: player-proximity heuristic (~5/7 ceiling on our clip - journal 0003),
-    # used only for reversals the trajectory classifier can't reach a decision on (not
-    # enough trajectory context, e.g. near a clip boundary) - better than silently
-    # dropping them.
-    shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
-    traj_contacts, traj_bounces = classify_reversals_by_trajectory(
-        raw_reversal_frames, ball_detections
-    )
-    traj_classified = set(traj_contacts) | set(traj_bounces)
-    unclassified = [f for f in raw_reversal_frames if f not in traj_classified]
-
-    if unclassified:
-        prox_contacts, prox_bounces = classify_contact_vs_bounce(
-            unclassified, ball_detections, player_detections,
-            shot_player_distance_px=shot_dist_px,
-        )
-    else:
-        prox_contacts, prox_bounces = [], []
-
-    confirmed_shot_frames = sorted(traj_contacts + prox_contacts)
-    bounce_frames = sorted(traj_bounces + prox_bounces)
-
     logger.info(
-        f"  {len(raw_reversal_frames)} y-reversals → {len(floor_states) and sum(1 for s in floor_states if s == 'floor_level')} "
-        f"floor-level anchors | {len(confirmed_shot_frames)} confirmed shots + "
-        f"{len(bounce_frames)} bounces "
-        f"({len(traj_contacts) + len(traj_bounces)} via trajectory model, "
-        f"{len(prox_contacts) + len(prox_bounces)} via proximity fallback)"
+        f"  {len(raw_reversal_frames)} reversals → "
+        f"{sum(1 for s in floor_states if s == 'floor_level')} floor-level anchors | "
+        f"{len(confirmed_shot_frames)} confirmed shots + {len(bounce_frames)} bounces"
     )
     ball_shot_frames = confirmed_shot_frames
 

@@ -32,7 +32,29 @@ import numpy as np
 
 FEATURES_PATH = "datasets/external/hit_bounce_features.json"
 WEIGHTS_PATH  = "models/hit_bounce_classifier.json"
-FEATURE_NAMES = ["height_y", "vy_change_mag", "vx_change_mag"]
+# The three original features plus vx_sign_flip, the strongest single measured signal:
+# 71.8% of hits reverse x-direction against 2.1% of bounces. It was measured during the
+# original feature exploration and then left out of the model.
+#
+# This is NOT the most accurate feature set on this dataset, and that is deliberate.
+# Measured two ways - dataset accuracy on a clip-grouped split, and end-to-end shot F1
+# on the reference rally:
+#
+#     features                          held-out acc    rally F1
+#     height, |vy|, |vx|          (3)       84.1%         0.737
+#     + vy_before, vy_after       (6)       89.3%         0.600
+#     + vx_sign_flip              (4)       86.4%         0.824
+#
+# The six-feature model is the best on paper and the worst in the product. The cause is
+# a train/serve mismatch: this dataset's velocities come from hand-annotated ball
+# positions, while the pipeline computes them from TrackNet detections with interpolated
+# gaps. Raw signed velocities are the most noise-sensitive features of the set, they took
+# the largest weights, and that accuracy did not survive contact with real detections.
+# vx_sign_flip is a coarse binary, so it degrades gracefully instead.
+#
+# Optimise the end-to-end number, not this one. Caveat on the rally column: one clip,
+# 7 labelled shots, so treat it as directional rather than precise.
+FEATURE_NAMES = ["height_y", "vy_change_mag", "vx_change_mag", "vx_sign_flip"]
 
 
 def clip_split(events: list[dict], test_frac: float = 0.25, seed: int = 42):
@@ -75,7 +97,11 @@ def evaluate_threshold(events: list[dict], feature: str, threshold: float) -> di
 
 
 def to_xy(subset: list[dict]):
-    X = np.array([[e[f] for f in FEATURE_NAMES] for e in subset], dtype=float)
+    # vx_sign_flip is None in the feature file when the ball is barely moving
+    # horizontally, where "direction" is noise. It collapses to 0.0 ("no flip"),
+    # which is the encoding utils.hit_bounce_classifier produces at inference.
+    X = np.array([[0.0 if e.get(f) is None else float(e[f]) for f in FEATURE_NAMES]
+                  for e in subset], dtype=float)
     y = np.array([1.0 if e["label"] == "hit" else 0.0 for e in subset])
     return X, y
 
@@ -108,7 +134,7 @@ def main():
         te_acc = evaluate_threshold(test, feature, t)["accuracy"]
         print(f"  {feature:<16} threshold={t:8.2f}  train={100*tr_acc:.1f}%  test={100*te_acc:.1f}%")
 
-    print("\n--- Step 2: 3-feature logistic regression ---")
+    print("\n--- Step 2: 6-feature logistic regression ---")
     Xtr, ytr = to_xy(train)
     Xte, yte = to_xy(test)
     mu, sigma = Xtr.mean(0), Xtr.std(0)

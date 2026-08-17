@@ -34,6 +34,7 @@ from utils import (
     smooth_trajectories, peak_speed_kmh_near_frame,
     detect_xvelocity_candidates,
     merge_nearby_candidates,
+    stub_path_for_video,
 )
 
 # Realistic range constants (km/h)
@@ -59,9 +60,11 @@ def evaluate(video_path: str) -> dict:
     player_tracker = PlayerTracker(model_path="yolov8x")
 
     player_dets = player_tracker.detect_frames(
-        frames, read_from_stub=True, stub_path="tracker_stubs/player_detections.pkl"
+        frames,
+        read_from_stub=True,
+        stub_path=stub_path_for_video("tracker_stubs/player_detections.pkl", video_path),
     )
-    ball_tracker, ball_dets = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
+    ball_tracker, ball_dets = pipeline_ball_detections(frames, video_path)   # TrackNet, matches pipeline
     ball_dets = ball_tracker.interpolate_ball_positions(ball_dets)
 
     # ponytail: single-frame keypoints - fine for the near-static input_video_2 baseline;

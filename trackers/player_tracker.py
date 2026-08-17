@@ -1,5 +1,6 @@
 from ultralytics import YOLO 
 import cv2
+import os
 import pickle
 import sys
 sys.path.append("../")
@@ -288,20 +289,29 @@ class PlayerTracker:
     def detect_frames(self,frames, read_from_stub=False, stub_path=None):
         player_detections = []
 
-        if read_from_stub and stub_path is not None:
+        # A cache miss means "detect it now", not "crash". This raised FileNotFoundError
+        # for any clip that had not been run before, which made per-clip stub paths
+        # unusable. The length check catches the other half: a stub written for a
+        # different clip (or a different --max-frames cut) that happens to share a
+        # filename would otherwise hand this clip another video's players.
+        if read_from_stub and stub_path is not None and os.path.exists(stub_path):
             with open(stub_path, 'rb') as f:
-                player_detections = pickle.load(f)
-            return player_detections
+                cached = pickle.load(f)
+            if len(cached) == len(frames):
+                return cached
+            print(f"  [stub] {stub_path} has {len(cached)} frames, clip has "
+                  f"{len(frames)} - ignoring stale cache, detecting fresh")
 
         for frame in frames:
             player_dict = self.detect_frame(frame)
             player_detections.append(player_dict)
-        
+
         if stub_path is not None:
+            os.makedirs(os.path.dirname(stub_path) or ".", exist_ok=True)
             with open(stub_path, 'wb') as f:
                 pickle.dump(player_detections, f)
-        
-        return player_detections  
+
+        return player_detections
     
 
     def detect_frame(self,frame):

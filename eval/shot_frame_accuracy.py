@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import csv
 from _ball_source import pipeline_ball_detections
-from utils import read_video, detect_xvelocity_candidates, merge_nearby_candidates
+from utils import read_video, derive_shot_frames, stub_path_for_video
+from trackers import PlayerTracker
 
 # Hand-labeled ground truth for input_video_2.mp4
 # Captured during audit session 2026-05-06 from audit_frames/ analysis
@@ -76,12 +77,22 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
     print(f"{'=' * 55}")
 
     frames          = read_video(video_path)
-    tracker, ball_det = pipeline_ball_detections(frames)   # TrackNet, matches pipeline
+    tracker, ball_det = pipeline_ball_detections(frames, video_path)   # TrackNet, matches pipeline
     ball_det        = tracker.interpolate_ball_positions(ball_det)
-    # matches main.py: union of y-reversal + x-velocity candidates, merged (docs/journal/0018)
-    detected        = merge_nearby_candidates(
-        sorted(set(tracker.get_ball_shot_frames(ball_det)) | set(detect_xvelocity_candidates(ball_det)))
+
+    # Grade the frames the pipeline reports as SHOTS, not the raw candidate union.
+    # This eval used to stop at the merged candidates, which include every bounce in
+    # the rally: 25 candidates against 7 real shots, scored as 18 false-positive shots
+    # and 28% precision for a stage main.py never emits. `derive_shot_frames` is the
+    # same function main.py calls, so this now measures the shipped behaviour.
+    player_tracker = PlayerTracker(model_path="yolov8x")
+    player_det = player_tracker.detect_frames(
+        frames,
+        read_from_stub=True,
+        stub_path=stub_path_for_video("tracker_stubs/player_detections.pkl", video_path),
     )
+    detected, bounces, raw = derive_shot_frames(tracker, ball_det, player_det)
+    print(f"Candidates  : {len(raw)} raw reversals → {len(detected)} shots, {len(bounces)} bounces")
 
     print(f"GT shots    : {len(gt_frames)}")
     print(f"Detected    : {len(detected)} at frames {detected}")
