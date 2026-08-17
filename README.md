@@ -73,7 +73,7 @@ Tennis-Vision/
 │                              #   small and committed)
 ├── notes/                    # CV concept write-ups (homography, Kalman filtering, SORT,
 │                              #   DeepSORT re-ID, temporal smoothing, shot detection)
-├── tests/                    # pytest unit + integration tests (170 passing)
+├── tests/                    # pytest unit + integration tests (176 passing)
 ├── tools/                    # label_shots.py - keyboard-driven contact/bounce labeling tool
 ├── trackers/                 # tracknet_ball_tracker.py (production), player_tracker.py,
 │                              #   ball_tracker.py (legacy YOLO ball tracker, superseded)
@@ -150,12 +150,11 @@ still-moving numbers on an active sprint branch, not final claims.
 
 | Metric | Result | Script |
 |---|---|---|
-| Ball *detection rate* (a position was output, **not** an accuracy) | 89.6% of 2,365 frames | 📦 `eval/ball_localization_accuracy.py` |
-| Ball *localization* error vs ground truth | median **5.8px**, 75th 11.9px, 90th 19.4px (at 360x640) | 📦 `eval/ball_localization_accuracy.py` |
-| Ball located within 20px of ground truth | 90.7% of outputs, 82.9% of visible-ball frames | 📦 `eval/ball_localization_accuracy.py` |
-| Ball located within 5px of ground truth | 44.8% of outputs, 40.9% of visible-ball frames | 📦 `eval/ball_localization_accuracy.py` |
-| Shot-frame recall | 7/7 shots found, mean offset 10.1 frames | `eval/shot_frame_accuracy.py` |
-| Shot-frame precision | 70.0% (3 false positives in 10 reported shots), F1 0.82 | `eval/shot_frame_accuracy.py` |
+| Ball *detection rate* (a position was output, **not** an accuracy) | 88.6% (16 clips) | 📦 `eval/ball_localization_accuracy.py` |
+| Ball *localization* error vs ground truth | median **5.4px**, 90th 18.0px (at 360x640) | 📦 `eval/ball_localization_accuracy.py` |
+| Ball located within 5px of ground truth | 46.8% of outputs, 42.5% of visible-ball frames | 📦 `eval/ball_localization_accuracy.py` |
+| Shot-frame recall, reference clip | 7/7 shots found, mean offset 7.4 frames | `eval/shot_frame_accuracy.py` |
+| Shot-frame precision, reference clip | 58.3% (5 false positives in 12 reported), F1 0.74 | `eval/shot_frame_accuracy.py` |
 | Ball speed *plausibility* (a range check, **not** accuracy) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 | Player speed *plausibility* (range check) | 21/21 within physical bounds | ✅ `eval/speed_accuracy.py` |
 
@@ -173,20 +172,43 @@ still-moving numbers on an active sprint branch, not final claims.
 > ⚠️ Those two rows check that speeds are *physically possible*, not that they are
 > *correct*. Rally speeds are currently **systematically low** - see Limitations.
 
-> ⚠️ Shot detection finds every real shot but still over-reports: 10 shots for a rally
-> that contains 7. The extra 3 are bounces the contact-vs-bounce classifier lets
-> through. Treat the shot **count** as an upper bound. Recall is the number to trust
-> here, not precision. Measured on one clip with 7 labelled shots, so it is directional
-> rather than precise.
+> ⚠️ Those two shot-frame rows come from **one clip with 7 labelled shots**, which is too
+> small to draw conclusions from. They are listed because that clip is the reproducible
+> demo, not because 7 events settle anything. The dataset-scale event numbers below (76
+> labelled contacts, 10 clips) are the ones to trust, and they disagree with this clip on
+> precision. Shot detection finds every real shot here and over-reports: 12 for a rally
+> containing 7, the extras being bounces the classifier lets through. Treat the shot
+> **count** as an upper bound.
 
 ### Contact/bounce event detection, at real dataset scale (91 clips, TrackNet's own
 training data - same lineage as `models/tracknet.pt`, not a foreign benchmark)
 
+Two different questions, with two very different answers. Both are reported because the
+gap between them is the honest measure of how much ball-detection noise costs.
+
+**Given perfect ball positions** (the dataset's own hand-labelled coordinates fed straight
+into the candidate generators). This isolates the generators and is an upper bound, not
+shipped behaviour:
+
 | Configuration | Recall | Precision | Script |
 |---|---|---|---|
-| Real-model detection noise (3 clips, 55 events) | 92.7% | 94.9% | `eval/retest_real_model_noise.py` |
-| y-reversal only, through trained classifier (91 clips) | 75.8% | 88.9% | `eval/retest_union_candidates_full_pipeline.py` |
-| **y-reversal + x-velocity union, through trained classifier** (production config) | **87.6%** | **90.3%** | `eval/retest_union_candidates_full_pipeline.py` |
+| y-reversal only, through trained classifier (91 clips) | 75.8% | 88.9% | 📦 `eval/retest_union_candidates_full_pipeline.py` |
+| y-reversal + x-velocity union, through trained classifier (91 clips) | 87.6% | 90.3% | 📦 `eval/retest_union_candidates_full_pipeline.py` |
+
+**Running real TrackNet detection end to end**, which is what the pipeline actually does
+(10 clips, 76 labelled contacts, trajectory classifier only, no player proximity):
+
+| Postprocessing | Recall | Precision | F1 | Mean offset | Script |
+|---|---|---|---|---|---|
+| mean of all responding pixels (previous) | 48.7% | 92.5% | 0.638 | 3.6 frames | 📦 `eval/event_detection_on_real_detections.py` |
+| **largest connected component** (production config) | **51.3%** | **92.9%** | **0.661** | **3.2 frames** | 📦 `eval/event_detection_on_real_detections.py` |
+
+> ⚠️ **Event recall on real detections is roughly half the upper bound: 51.3% against
+> 87.6%.** Precision holds up (92.9%), so the events reported are overwhelmingly real, but
+> around half the contacts in a rally are missed. The cause is ball-detection noise, not
+> the candidate generators: a 5.8px median localization error both manufactures reversals
+> and buries real ones. Improving ball localization is therefore the highest-value work
+> for every event-derived number, which is why it is first on the roadmap.
 
 ### Hit vs. bounce classification
 

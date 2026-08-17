@@ -225,10 +225,22 @@ _H = np.array([[1.0, 0.0, 0.0, 0.0],
                [0.0, 1.0, 0.0, 0.0]])
 
 
+# Mahalanobis gate thresholds for a 2-D measurement (2 degrees of freedom), as chi-square
+# critical values. A measurement is rejected when its innovation is further from the
+# prediction than this, scaled by the predicted covariance, so the gate tightens as the
+# filter grows confident and opens automatically after a long gap.
+#
+# These are the standard tabulated values, hardcoded rather than pulled from scipy.stats
+# to avoid a dependency for two constants.
+CHI2_GATE_95 = 5.991
+CHI2_GATE_99 = 9.210
+
+
 def rts_smooth(
     measurements: list[tuple[float, float] | None],
     process_noise: float = 1e-2,
     measurement_noise: float = 1e-1,
+    gate_chi2: float | None = None,
 ) -> list[tuple[float, float, float, float]]:
     """
     Forward-backward smooth a 2-D trajectory that may have gaps.
@@ -240,6 +252,12 @@ def rts_smooth(
         process_noise:      how much the constant-velocity assumption is trusted. Larger
                             follows the measurements more closely.
         measurement_noise:  assumed detector error. Larger smooths harder.
+        gate_chi2:          if set, reject a measurement whose squared Mahalanobis
+                            distance from the prediction exceeds this, treating the frame
+                            as undetected instead. Use CHI2_GATE_99 (or _95). Without a
+                            gate, one gross mislocalization is averaged into its
+                            neighbours instead of being discarded, which is what a plain
+                            smoother does wrong on this detector's error distribution.
 
     Returns:
         One (x, y, vx, vy) per input frame, including for frames that had no measurement.
@@ -270,13 +288,27 @@ def rts_smooth(
         x_pred.append(xp)
         P_pred.append(Pp)
 
-        if z is None:
-            # No measurement: the prediction IS the estimate, and the covariance grows.
+        accepted = z is not None
+        if accepted:
+            S = _H @ Pp @ _H.T + R
+            S_inv = np.linalg.pinv(S)
+            innovation = np.asarray(z, dtype=float) - _H @ xp
+            if gate_chi2 is not None:
+                # Squared Mahalanobis distance of the measurement from the prediction.
+                # Distances are measured in units of the filter's own uncertainty, so
+                # early on (P is deliberately huge) nothing is rejected and the filter is
+                # free to lock on; once it is confident, a detection metres from the
+                # predicted path is thrown out rather than blended in.
+                if float(innovation @ S_inv @ innovation) > gate_chi2:
+                    accepted = False
+
+        if not accepted:
+            # No usable measurement: the prediction IS the estimate, and the covariance
+            # grows, which widens the gate and lets the filter recover if it was wrong.
             x, P = xp, Pp
         else:
-            S = _H @ Pp @ _H.T + R
-            K = Pp @ _H.T @ np.linalg.inv(S)
-            x = xp + K @ (np.asarray(z, dtype=float) - _H @ xp)
+            K = Pp @ _H.T @ S_inv
+            x = xp + K @ innovation
             P = Pp - K @ _H @ Pp
 
         x_filt.append(x)

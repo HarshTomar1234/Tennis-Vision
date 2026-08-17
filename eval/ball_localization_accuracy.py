@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 
 from trackers.tracknet_ball_tracker import TrackNetBallTracker
-from utils.kalman_smoother import rts_smooth
+from utils.kalman_smoother import rts_smooth, CHI2_GATE_99
 
 DATASET_ZIP = "datasets/external/tracknet_original/Dataset.zip"
 
@@ -74,6 +74,10 @@ SHIPPED = (0, 5)
 # Variants worth measuring. Threshold 0 is the most permissive the network allows, so the
 # question is whether raising it removes noise faster than it removes real detections.
 SWEEP = [(0, 5), (0, 3), (0, 10), (64, 5), (128, 5), (128, 3), (192, 5)]
+
+# Same thresholds, but taking the largest connected component instead of the mean of all
+# above-threshold pixels. Tests whether blended multi-blob responses explain the tail.
+BLOB_SWEEP = [(0, 5), (0, 3), (64, 5), (128, 5)]
 
 
 def load_clip(zf: zipfile.ZipFile, label_path: str, max_frames: int):
@@ -103,12 +107,36 @@ def load_clip(zf: zipfile.ZipFile, label_path: str, max_frames: int):
     return frames, truth, contacts
 
 
-def heatmap_to_centre(intensity: np.ndarray, threshold: int, min_cluster: int):
-    """Ball centre in network coordinates from one 360x640 intensity map, or None."""
-    ys, xs = np.where(intensity > threshold)
-    if len(xs) < min_cluster:
+def heatmap_to_centre(intensity: np.ndarray, threshold: int, min_cluster: int,
+                      largest_blob: bool = False):
+    """
+    Ball centre in network coordinates from one 360x640 intensity map, or None.
+
+    `largest_blob=False` reproduces the shipped postprocess: the mean of every
+    above-threshold pixel in the frame. That is only correct when the heatmap responds in
+    one place. When it responds in two, the mean lands BETWEEN them, which is a position
+    the ball never occupied, and it is a plausible source of the heavy tail in the error
+    distribution (5.8px median against a 19.4px 90th percentile).
+
+    `largest_blob=True` instead takes the centroid of the biggest connected component,
+    so a second weaker response is ignored rather than averaged in.
+    """
+    mask = (intensity > threshold).astype(np.uint8)
+    if mask.sum() < min_cluster:
         return None
-    return float(xs.mean()), float(ys.mean())
+
+    if not largest_blob:
+        ys, xs = np.where(mask)
+        return float(xs.mean()), float(ys.mean())
+
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+    if n <= 1:
+        return None
+    # stats[:, 4] is pixel area; index 0 is the background label.
+    biggest = 1 + int(np.argmax(stats[1:, 4]))
+    if int(stats[biggest, 4]) < min_cluster:
+        return None
+    return float(centroids[biggest][0]), float(centroids[biggest][1])
 
 
 def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]],
@@ -163,7 +191,8 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]],
                     n_out, n_ok, n_vis, errs = stats[v]
                     if gt_net is not None:
                         n_vis += 1
-                    centre = heatmap_to_centre(intensity, v[0], v[1])
+                    centre = heatmap_to_centre(intensity, v[0], v[1],
+                                               largest_blob=len(v) > 2)
                     if centre is not None:
                         n_out += 1
                         if gt_net is not None:
@@ -174,7 +203,9 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]],
                     stats[v] = [n_out, n_ok, n_vis, errs]
 
         for params in smooth_params or []:
-            if len(params) > 2 and params[2] == "seg":
+            mode = params[2] if len(params) > 2 else ""
+            gate = CHI2_GATE_99 if "gate" in mode else None
+            if "seg" in mode:
                 # Smooth each free-flight span independently, splitting at the labelled
                 # contacts. A racket hit or bounce is an impulse: the ball's velocity
                 # changes discontinuously, so a constant-velocity smoother run across one
@@ -188,10 +219,11 @@ def evaluate(n_clips: int, max_frames: int, variants: list[tuple[int, int]],
                     if b > a:
                         smoothed.extend(rts_smooth(clip_raw[a:b],
                                                    process_noise=params[0],
-                                                   measurement_noise=params[1]))
+                                                   measurement_noise=params[1],
+                                                   gate_chi2=gate))
             else:
                 smoothed = rts_smooth(clip_raw, process_noise=params[0],
-                                      measurement_noise=params[1])
+                                      measurement_noise=params[1], gate_chi2=gate)
             n_out, n_ok, n_vis, errs = smooth_stats[params]
             for i, gt_net in enumerate(clip_gt):
                 # The smoother emits a position on every frame, including frames the
@@ -217,7 +249,7 @@ def report(result: dict) -> None:
           f"at 360x640")
     print(f"{'=' * 78}")
     print(f"{'thresh':>7} {'minpx':>6} {'det rate':>10} {'recall':>9} {'precision':>11} "
-          f"{'median err':>12}")
+          f"{'p50':>8} {'p90':>8}")
     print("-" * 78)
 
     for v, (n_out, n_ok, n_vis, errs) in result["stats"].items():
@@ -225,9 +257,10 @@ def report(result: dict) -> None:
         rec = n_ok / n_vis if n_vis else 0.0
         prec = n_ok / n_out if n_out else 0.0
         med = float(np.median(errs)) if errs else float("nan")
-        mark = "  <- shipped" if v == SHIPPED else ""
+        mark = "  <- shipped" if v == SHIPPED else ("  largest-blob" if len(v) > 2 else "")
+        p90 = float(np.percentile(errs, 90)) if errs else float("nan")
         print(f"{v[0]:>7} {v[1]:>6} {det:>9.1%} {rec:>8.1%} {prec:>10.1%} "
-              f"{med:>11.1f}px{mark}")
+              f"{med:>7.1f}px {p90:>6.1f}px{mark}")
 
     print("-" * 78)
     print("det rate  = frames where a position was output (what the README called 82.5%)")
@@ -250,7 +283,7 @@ def report(result: dict) -> None:
             med = float(np.median(errs)) if errs else float("nan")
             rec = n_ok / n_vis if n_vis else 0.0
             delta = (med - base_med) / base_med * 100 if base_med else float("nan")
-            tag = " per-segment" if len(params) > 2 else ""
+            tag = f"  {params[2]}" if len(params) > 2 else ""
             print(f"{params[0]:>11g} {params[1]:>11g} {(n_out / n_vis if n_vis else 0):>9.1%} "
                   f"{rec:>8.1%} {med:>11.1f}px {delta:>+8.1f}%{tag}")
         print("-" * 78)
@@ -282,6 +315,8 @@ def main():
     p.add_argument("--clips", type=int, default=10, help="clips to evaluate")
     p.add_argument("--max-frames", type=int, default=200, help="frames per clip cap")
     p.add_argument("--sweep", action="store_true", help="sweep postprocessing settings")
+    p.add_argument("--blobs", action="store_true",
+                   help="compare largest-connected-component centroid against the shipped mean")
     p.add_argument("--smooth", action="store_true",
                    help="also measure forward-backward (RTS) smoothing of the trajectory")
     args = p.parse_args()
@@ -291,12 +326,21 @@ def main():
         sys.exit(1)
 
     variants = SWEEP if args.sweep else [SHIPPED]
+    if args.blobs:
+        variants = [SHIPPED] + [v + ("blob",) for v in BLOB_SWEEP]
     # (process_noise, measurement_noise). Spans "trust the measurements" to "trust the
     # constant-velocity model", since which side wins is exactly what needs measuring.
-    smooth = [(1e-2, 1e-1), (1e-1, 1.0), (1.0, 1.0),
-              # Same settings, but smoothed per free-flight span instead of across
-              # the whole clip. Splits at ground-truth contacts.
-              (1e-2, 1e-1, "seg"), (1e-1, 1.0, "seg"), (1.0, 1.0, "seg")] if args.smooth else None
+    # Third element selects the mode: "seg" smooths each free-flight span separately
+    # (splitting at ground-truth contacts), "gate" enables the chi-square outlier gate.
+    smooth = [
+        (1.0, 1.0),
+        (1.0, 1.0, "seg"),
+        (1.0, 1.0, "gate"),
+        (1e-1, 1.0, "gate"),
+        (1e-2, 1e-1, "gate"),
+        (1.0, 1.0, "seg+gate"),
+        (1e-1, 1.0, "seg+gate"),
+    ] if args.smooth else None
     report(evaluate(args.clips, args.max_frames, variants, smooth))
 
 
