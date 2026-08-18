@@ -150,7 +150,7 @@ def frame_geometry(landmarks):
     return out
 
 
-def clip_features(path: Path, estimator: PoseEstimator):
+def clip_features(path: Path, estimator, seq_frames: int = SEQ_FRAMES):
     cap = cv2.VideoCapture(str(path))
     frames = []
     while True:
@@ -159,11 +159,11 @@ def clip_features(path: Path, estimator: PoseEstimator):
             break
         frames.append(frame)
     cap.release()
-    if len(frames) < SEQ_FRAMES:
+    if len(frames) < seq_frames:
         return None
 
     lo, hi = len(frames) // 4, len(frames) * 3 // 4
-    indices = [lo + (hi - lo) * i // max(1, SEQ_FRAMES - 1) for i in range(SEQ_FRAMES)]
+    indices = [lo + (hi - lo) * i // max(1, seq_frames - 1) for i in range(seq_frames)]
 
     geo = []
     for i in indices:
@@ -174,7 +174,7 @@ def clip_features(path: Path, estimator: PoseEstimator):
     usable = [g for g in geo if g is not None]
     # Needs enough of the stroke to measure motion at all. Half is generous, and clips
     # below it are reported rather than silently filled in.
-    if len(usable) < SEQ_FRAMES // 2:
+    if len(usable) < seq_frames // 2:
         return None
 
     # Speeds between consecutive usable frames, in shoulder-widths per frame.
@@ -224,16 +224,30 @@ def main():
     ap = argparse.ArgumentParser(description="Extract THETIS pose features")
     ap.add_argument("--per-class", type=int, default=165)
     ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument("--backend", choices=("mediapipe", "sam3d"), default="mediapipe",
+                    help="pose source. sam3d is ~1.6s/frame, so pair it with --seq-frames")
+    ap.add_argument("--seq-frames", type=int, default=SEQ_FRAMES,
+                    help="frames sampled per clip. Fewer weakens the motion features but "
+                         "is what makes the slower backend affordable")
     args = ap.parse_args()
 
     if not THETIS.is_dir():
         print(f"THETIS not found at {THETIS}. Run scripts/download_thetis.py")
         sys.exit(1)
 
-    estimator = PoseEstimator()
-    if not estimator.available:
-        print("Pose model unavailable. Run: tennis-vision download-models")
-        sys.exit(1)
+    if args.backend == "sam3d":
+        from utils.sam3d_pose import Sam3dPoseEstimator
+        estimator = Sam3dPoseEstimator()
+        if not estimator.available:
+            print("SAM 3D Body unavailable. Run: python scripts/download_sam3d_body.py")
+            print("and set SAM3D_BODY_CODE to the cloned inference repository.")
+            sys.exit(1)
+    else:
+        estimator = PoseEstimator()
+        if not estimator.available:
+            print("Pose model unavailable. Run: tennis-vision download-models")
+            sys.exit(1)
+    print(f"backend: {args.backend}, {args.seq_frames} frames per clip")
 
     samples = []
     print()
@@ -245,7 +259,7 @@ def main():
         clips = sorted(folder.glob("*.avi"))[:args.per_class]
         kept = 0
         for clip in clips:
-            feats = clip_features(clip, estimator)
+            feats = clip_features(clip, estimator, args.seq_frames)
             if feats is None:
                 continue
             subject = SUBJECT_RE.match(clip.name)
@@ -265,6 +279,8 @@ def main():
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps({
         "feature_names": FEATURE_NAMES,
+        "backend": args.backend,
+        "seq_frames": args.seq_frames,
         "samples": samples,
     }), encoding="utf-8")
 
