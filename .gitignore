@@ -102,3 +102,4 @@ dist/
 
 # Optional SAM 3D Body weights (Meta SAM License, gated, not redistributed)
 models/sam3d_body/
+.gstack/

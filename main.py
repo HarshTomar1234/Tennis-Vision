@@ -56,7 +56,7 @@ from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
 from utils.trajectory_3d import crosses_net, reconstruct_rally
-from utils.viewer_3d import build_viewer
+from utils.viewer_3d import build_viewer, players_to_metres
 from utils.web_video import to_browser_playable
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
 
@@ -1199,6 +1199,17 @@ def main():
         if web_video is None:
             logger.warning("  Viewer video tab will be empty: no browser-playable copy "
                            "could be produced (is ffmpeg installed?)")
+        # Player ground positions, converted from mini-court pixels to court metres.
+        # Passed only when the court fit was trusted: without a valid court these
+        # coordinates are meaningless, and a marker drawn from a bad homography would be
+        # a confident claim about where someone stood.
+        viewer_players = players_to_metres(
+            player_mini_court,
+            mini_court.court_start_x,
+            mini_court.court_start_y,
+            px_to_m_scale,
+        ) if fit_ok else None
+
         viewer_path = build_viewer(
             trajectories,
             Path(output_path).with_suffix(".html"),
@@ -1206,7 +1217,10 @@ def main():
             video_path=web_video.name if web_video else None,
             shot_types=shot_labels,
             court_valid=fit_ok,
+            players_m=viewer_players,
         )
+        if viewer_players:
+            logger.info(f"  3-D viewer: {len(viewer_players)} frames of player positions")
         logger.info(f"3-D viewer  → {viewer_path}  (open in any browser)")
 
     logger.info("=" * 60)

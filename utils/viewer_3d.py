@@ -226,6 +226,43 @@ const LINES = courtLines();
 
 // Net tape as a catenary-ish curve with zero slope at the posts, so it does not kink
 // where it meets them. Posts sit outside the doubles sidelines, as on a real court.
+// Player ids in a stable order, so the two colours do not swap between frames.
+const PLAYER_IDS = (() => {
+  const ids = new Set();
+  for (const f of Object.keys(DATA.players || {})) {
+    for (const pid of Object.keys(DATA.players[f])) ids.add(pid);
+  }
+  return [...ids].sort();
+})();
+
+const PLAYER_FRAMES = Object.keys(DATA.players || {}).map(Number).sort((a, b) => a - b);
+
+function playersAt(seconds) {
+  // Nearest labelled frame rather than interpolation: player tracks have gaps, and an
+  // interpolated position across a gap would be a claim the tracker never made.
+  if (!DATA.players || !PLAYER_FRAMES.length || !DATA.fps) return [];
+  const want = seconds * DATA.fps;
+  let lo = 0, hi = PLAYER_FRAMES.length - 1, best = PLAYER_FRAMES[0];
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (Math.abs(PLAYER_FRAMES[mid] - want) < Math.abs(best - want)) best = PLAYER_FRAMES[mid];
+    if (PLAYER_FRAMES[mid] < want) lo = mid + 1; else hi = mid - 1;
+  }
+  // Too far from any tracked frame means the player was not tracked here. Draw nothing
+  // rather than a stale marker sitting where they no longer are.
+  if (Math.abs(best - want) > DATA.fps * 0.5) return [];
+  return Object.entries(DATA.players[String(best)] || {});
+}
+
+function ringOnGround(x, y, r, colour) {
+  const pts = [];
+  for (let i = 0; i <= 20; i++) {
+    const a = i / 20 * Math.PI * 2;
+    pts.push([x + r * Math.cos(a), y + r * Math.sin(a), 0]);
+  }
+  strokePath(pts, colour, 2);
+}
+
 function netCurve() {
   const x0 = -POST_OUT, x1 = W + POST_OUT, pts = [];
   for (let i = 0; i <= 28; i++) {
@@ -241,7 +278,17 @@ const VIEWS = {
   broadcast:{az:0.0, polar:0.62, dist:38}, side:{az:1.57, polar:0.95, dist:34},
   top:{az:0.0, polar:0.12, dist:34},       baseline:{az:0.0, polar:1.25, dist:30},
 };
-let cam = {...VIEWS.broadcast};
+
+// Opens near the side line, not on the broadcast angle. Looking straight down the court
+// is the familiar television framing and it is the worst view for this page: it
+// compresses ball height to almost nothing, which is the one thing a 3-D reconstruction
+// exists to show. From the side an arc reads as an arc.
+//
+// Slightly off pure side (1.32 rather than 1.57) so the court still has some depth and
+// does not collapse to a flat rectangle. A full three-quarter angle was tried and looked
+// worse: the court sits diagonally across the canvas and reads as neither view.
+// Broadcast remains one click away for comparing against the video.
+let cam = {az: 1.32, polar: 0.86, dist: 34};
 let basis = null;             // trig hoisted out of the per-point hot path
 function updateBasis() {
   const ca = Math.cos(cam.az), sa = Math.sin(cam.az);
@@ -262,7 +309,7 @@ function project(p) {
 
 /* ---------- state ---------- */
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-let selected = -1, playing = false, tNorm = 0, rate = 1;
+let selected = 0, playing = false, tNorm = 0, rate = 1, zoom = 1;
 const TOTAL = DATA.segments.length ? Math.max(...DATA.segments.map(s => s.end_s)) : 1;
 
 let pending = false;
@@ -272,12 +319,51 @@ function requestDraw() {                    // rAF throttle: pointer events fire
   requestAnimationFrame(() => { pending = false; draw(); });   // drag feel sluggish.
 }
 
+// Corners of the playing area plus the net posts and a generous overhead allowance.
+// Fitting to these rather than to the ball arcs keeps the framing stable: an unusually
+// high lob should not shrink the court for the whole clip.
+function fitPoints() {
+  const pts = [];
+  for (const x of [-POST_OUT, W + POST_OUT]) {
+    for (const y of [0, L]) {
+      pts.push([x, y, 0]);
+      pts.push([x, y, 3.0]);
+    }
+  }
+  return pts;
+}
+
+// Scale that makes the court fill the canvas, at any orbit angle and any aspect ratio.
+// The previous version used 0.9 * min(width, height), which ignored the width entirely:
+// on a 1600x900 window the court rendered into roughly a fifth of the available area and
+// the rest was empty. Projecting the court at unit scale and solving for the factor that
+// fits it means the framing is correct for every view preset and every window shape.
+function fitScale() {
+  // Self-sufficient: resize() runs at page init before any draw, so the trig basis may
+  // still be null here. Without this the very first call throws inside project() and the
+  // canvas never paints at all.
+  updateBasis();
+  const saved = FSCALE;
+  FSCALE = 1;
+  let maxX = 1e-6, maxY = 1e-6;
+  for (const p of fitPoints()) {
+    const P = project(p);
+    if (!P) continue;
+    maxX = Math.max(maxX, Math.abs(P[0] - VW / 2));
+    maxY = Math.max(maxY, Math.abs(P[1] - VH / 2));
+  }
+  FSCALE = saved;
+  // 0.86 leaves a margin so the baselines do not touch the edges.
+  return Math.min(VW / 2 / maxX, VH / 2 / maxY) * 0.86;
+}
+
 function resize() {
   const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   VW = Math.round(r.width); VH = Math.round(r.height);
   cv.width = Math.round(VW * dpr); cv.height = Math.round(VH * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  FSCALE = 0.9 * Math.min(VW, VH);
+  FSCALE = 1;
+  FSCALE = fitScale() * zoom;
   requestDraw();
 }
 addEventListener('resize', resize);
@@ -306,6 +392,10 @@ function meanDepth(points) {
 
 function draw() {
   updateBasis();
+  // Refit every frame: orbiting changes the court's projected extent, and a scale fixed
+  // at resize time would leave the court small at some angles and clipped at others.
+  // fitScale projects sixteen points, so this costs nothing measurable.
+  FSCALE = fitScale() * zoom;
   ctx.clearRect(0, 0, VW, VH);
   ctx.lineJoin = ctx.lineCap = 'round';
 
@@ -317,22 +407,62 @@ function draw() {
     quad.slice(1).forEach(c => ctx.lineTo(c[0], c[1]));
     ctx.closePath(); ctx.fill();
   }
-  LINES.forEach(([a,b]) => strokePath([a,b], 'rgba(220,235,240,.85)', 1.5));
+  // Boundary lines carry more weight than the interior ones. Drawing all eleven at the
+  // same weight made the court read as a grid and put the service lines in direct
+  // competition with the ball arcs, which are the point of the view.
+  LINES.forEach(([a, b], i) => {
+    const boundary = i < 4;
+    strokePath([a, b], boundary ? 'rgba(228,242,247,.92)' : 'rgba(190,212,222,.45)',
+               boundary ? 2.0 : 1.1);
+  });
 
   // Ground shadow of every arc: the cheapest way to make height legible without
   // orbiting, because a flat arc against a flat court reads as no height at all.
-  DATA.segments.forEach(s =>
-    strokePath(s.points.map(p => [p[0], p[1], 0]), 'rgba(0,0,0,.35)', 1.2));
+  // Shadow only the arc under examination. Seventeen shadows plus seventeen arcs was
+  // twice the ink for the same information, and the shadow is a height cue for the arc
+  // you are reading, not for the whole rally at once.
+  DATA.segments.forEach((s, i) => {
+    const lit = i === selected || (tNorm * TOTAL >= s.start_s && tNorm * TOTAL < s.end_s);
+    if (lit) strokePath(s.points.map(p => [p[0], p[1], 0]), 'rgba(0,0,0,.45)', 1.4);
+  });
 
   // Depth-sort the arcs against the net so a ball behind the net renders behind it.
   // Drawing arcs last unconditionally made every ball appear in front of the tape -
   // and "did it clear the net" is the question this view exists to answer.
   const drawables = DATA.segments.map((s, i) => ({kind:'arc', i, s, d: meanDepth(s.points)}));
   drawables.push({kind:'net', d: meanDepth(NET)});
+
+  // Players at the current instant, if the court fit was trusted. Their FEET are the
+  // one position the floor homography places exactly: a standing player is on the
+  // ground by definition, while the ball is floor-valid only at a bounce or a contact.
+  // So these are drawn as ground markers with a height cue rather than as bodies. The
+  // position is evidence; a body would be decoration, and this viewer does not decorate.
+  const nowPlayers = playersAt(tNorm * TOTAL);
+  for (const [pid, pos] of nowPlayers) {
+    drawables.push({kind:'player', pid, pos, d: meanDepth([[pos[0], pos[1], 0]])});
+  }
+
   drawables.sort((a, b) => b.d - a.d);
 
   const tNow = tNorm * TOTAL;
   for (const item of drawables) {
+    if (item.kind === 'player') {
+      const [x, y] = item.pos;
+      // A ring on the ground plus a short vertical stem. The ring says where, and the
+      // stem gives the eye something to judge depth against, without implying we know
+      // anything about the player's pose, which we do not.
+      const col = item.pid === PLAYER_IDS[0] ? '#5ad2a0' : '#e3a13d';
+      ringOnGround(x, y, 0.45, col);
+      strokePath([[x, y, 0], [x, y, 1.75]], col + 'aa', 2);
+      const head = project([x, y, 1.75]);
+      if (head) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(head[0], head[1], Math.max(2.5, FSCALE * 0.05 / head[2]), 0, 2*Math.PI);
+        ctx.fill();
+      }
+      continue;
+    }
     if (item.kind === 'net') {
       // Net as a surface, not just a tape: two posts, the curve, and vertical mesh.
       strokePath([[-POST_OUT,NETY,0],[-POST_OUT,NETY,NETP]], '#cfd8dd', 2.4);
@@ -349,10 +479,28 @@ function draw() {
     const active = tNow >= s.start_s && tNow < s.end_s;
     // Depth fog: far arcs recede instead of every arc reading at the same weight.
     const fade = Math.max(0.25, Math.min(1, 34 / item.d));
+    // Seventeen arcs at similar weight read as spaghetti and hide the one being
+    // examined. Context arcs are dropped to a faint trace so the rally is still legible
+    // as a whole, while the selected and playing arcs carry the weight. Measured on the
+    // reference clip, which has 17 flight segments over 19 seconds.
+    const context = Math.max(0.10, 0.16 * fade);
     const colour = on ? '#4ec9b0'
                  : active ? '#ffa657'
-                 : `rgba(111,151,173,${(0.5 * fade).toFixed(2)})`;
-    strokePath(s.points, colour, on || active ? 3 : 1.6);
+                 : `rgba(126,166,188,${context.toFixed(2)})`;
+    strokePath(s.points, colour, on ? 3.4 : active ? 3.0 : 1.0);
+
+    // Endpoint dots on the highlighted arc: a flight begins and ends at a real detected
+    // event, and marking them says where the evidence actually is.
+    if (on || active) {
+      for (const end of [s.points[0], s.points[s.points.length - 1]]) {
+        const E = project(end);
+        if (!E) continue;
+        ctx.fillStyle = on ? '#4ec9b0' : '#ffa657';
+        ctx.beginPath();
+        ctx.arc(E[0], E[1], Math.max(2.5, FSCALE * 0.035 / E[2]), 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
 
     if (active && s.points.length > 1) {
       const f = (tNow - s.start_s) / Math.max(s.end_s - s.start_s, 1e-6);
@@ -387,7 +535,8 @@ cv.addEventListener('pointermove', e => {
 });
 cv.addEventListener('wheel', e => {
   e.preventDefault();
-  cam.dist = Math.max(16, Math.min(90, cam.dist * (1 + Math.sign(e.deltaY) * 0.09)));
+  zoom = Math.max(0.45, Math.min(4.0, zoom * (1 - Math.sign(e.deltaY) * 0.09)));
+  FSCALE = fitScale() * zoom;
   requestDraw();
 }, {passive:false});
 
@@ -477,7 +626,7 @@ function tick(ts) {
 /* ---------- views, keyboard, tabs ---------- */
 document.querySelectorAll('[data-view]').forEach(b =>
   b.onclick = () => { cam = {...VIEWS[b.dataset.view]}; requestDraw(); });
-document.getElementById('reset').onclick = () => { cam = {...VIEWS.broadcast}; requestDraw(); };
+document.getElementById('reset').onclick = () => { cam = {az: 1.32, polar: 0.86, dist: 34}; zoom = 1; requestDraw(); };
 
 addEventListener('keydown', e => {
   const k = e.key;
@@ -486,8 +635,8 @@ addEventListener('keydown', e => {
   else if (k === 'ArrowRight') cam.az += 0.08;
   else if (k === 'ArrowUp')    cam.polar = Math.max(0.06, cam.polar - 0.06);
   else if (k === 'ArrowDown')  cam.polar = Math.min(1.45, cam.polar + 0.06);
-  else if (k === '+' || k === '=') cam.dist = Math.max(16, cam.dist * 0.92);
-  else if (k === '-') cam.dist = Math.min(90, cam.dist * 1.08);
+  else if (k === '+' || k === '=') { zoom = Math.min(4.0, zoom * 1.09); FSCALE = fitScale() * zoom; }
+  else if (k === '-') { zoom = Math.max(0.45, zoom / 1.09); FSCALE = fitScale() * zoom; }
   else if (k === 'r' || k === 'R') cam = {...VIEWS.broadcast};
   else return;
   requestDraw();
@@ -523,6 +672,42 @@ resize(); updateTime();
 """
 
 
+def players_to_metres(player_mini_court, court_start_x, court_start_y, px_to_m):
+    """
+    Convert mini-court player positions to court metres for the 3-D view.
+
+    Player FEET are the one thing the floor homography places exactly. The ball is only
+    floor-valid at a bounce or a contact and is modelled in between, but a standing player
+    is on the ground by definition, so these positions are measured rather than inferred.
+    That is why players are drawn as ground markers with a height cue rather than as
+    reconstructed 3-D bodies: the position is evidence, the body would be decoration.
+
+    Args:
+        player_mini_court: {frame: {player_id: (x_px, y_px)}} in mini-court pixels.
+        court_start_x/y:   mini-court origin, the top-left corner of the drawn court.
+        px_to_m:           metres per mini-court pixel.
+
+    Returns:
+        {frame: {player_id: (x_m, y_m)}} in the same court frame the viewer draws,
+        with x across the court and y along it.
+    """
+    out = {}
+    for frame, players in (player_mini_court or {}).items():
+        placed = {}
+        for pid, pos in (players or {}).items():
+            if pos is None:
+                continue
+            x_m = (float(pos[0]) - court_start_x) * px_to_m
+            y_m = (float(pos[1]) - court_start_y) * px_to_m
+            # Anything far outside the court is a tracking failure, not a player, and
+            # drawing it would put a marker in the crowd.
+            if -3.0 <= x_m <= COURT_WIDTH_DOUBLES_M + 3.0 and -3.0 <= y_m <= COURT_LENGTH_M + 3.0:
+                placed[str(pid)] = (round(x_m, 2), round(y_m, 2))
+        if placed:
+            out[str(frame)] = placed
+    return out
+
+
 def build_viewer(
     trajectories,
     output_path: str | Path,
@@ -531,6 +716,7 @@ def build_viewer(
     shot_types: dict[int, str] | None = None,
     court_valid: bool = True,
     surface: str = "unknown",
+    players_m: dict | None = None,
 ) -> Path:
     """
     Write a self-contained interactive 3-D viewer for one analysed clip.
@@ -544,6 +730,9 @@ def build_viewer(
         shot_types:   frame -> shot label.
         court_valid:  when false the page says so, matching the video's warning banner.
         surface:      hard | clay | grass, used to colour the court.
+        players_m:    {frame: {player_id: (x_m, y_m)}} from players_to_metres, drawn as
+                      ground markers. Omitted when the court fit failed, since without a
+                      trusted court these positions mean nothing.
 
     Returns the written path.
     """
@@ -580,6 +769,8 @@ def build_viewer(
         # that some browsers refuse, and the page is meant to sit beside its video.
         "video": Path(video_path).name if video_path else None,
         "court_valid": bool(court_valid),
+        "players": players_m if (players_m and court_valid) else None,
+        "fps": round(float(fps), 3) if fps else 0.0,
         "surface_colour": SURFACE_COLOURS.get(surface, SURFACE_COLOURS["unknown"]),
         "note": ("Each arc is one free-flight reconstruction between detected events. "
                  "Speed is the average over the flight, so it reads at or just below a "
