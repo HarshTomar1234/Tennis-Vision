@@ -94,7 +94,7 @@ def fetch(classes: list[str], workdir: Path) -> bool:
     return True
 
 
-def install(classes: list[str], workdir: Path) -> int:
+def install(classes: list[str], workdir: Path, merge: bool = False) -> int:
     TARGET.mkdir(parents=True, exist_ok=True)
     installed = 0
     for name in classes:
@@ -103,9 +103,27 @@ def install(classes: list[str], workdir: Path) -> int:
         if not src.is_dir():
             print(f"  [FAILED]  {name}: not present after checkout")
             continue
-        if dst.exists():
-            print(f"  [skip]    {name} already present")
+        if dst.exists() and not merge:
+            print(f"  [skip]    {name} already present ({len(list(dst.glob('*.avi')))} clips)")
             continue
+
+        if dst.exists():
+            # Merge mode: copy only clips not already on disk. Purely additive, because
+            # an earlier attempt at completing these classes moved the existing folders
+            # aside first, the fetch then failed, and the only copy of that data was
+            # briefly a directory named .old_something. Never again: nothing here
+            # removes or renames what is already present.
+            added = 0
+            for clip in src.glob("*.avi"):
+                target = dst / clip.name
+                if not target.exists():
+                    shutil.copy2(clip, target)
+                    added += 1
+            total = len(list(dst.glob("*.avi")))
+            print(f"  [merge]   {name}: +{added} new, {total} total")
+            installed += 1 if added else 0
+            continue
+
         shutil.copytree(src, dst)
         print(f"  [ok]      {name}: {len(list(dst.glob('*.avi')))} clips")
         installed += 1
@@ -118,6 +136,8 @@ def main() -> int:
                    help="specific classes (default: all)")
     p.add_argument("--missing-only", action="store_true",
                    help="only classes not already in datasets/external/thetis")
+    p.add_argument("--merge", action="store_true",
+                   help="add clips missing from classes already on disk (never deletes)")
     p.add_argument("--keep-temp", action="store_true",
                    help="keep the temporary checkout for inspection")
     args = p.parse_args()
@@ -140,7 +160,7 @@ def main() -> int:
         return 1
 
     print()
-    installed = install(classes, workdir)
+    installed = install(classes, workdir, merge=args.merge)
 
     if not args.keep_temp:
         shutil.rmtree(workdir, ignore_errors=True)

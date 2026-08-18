@@ -97,9 +97,13 @@ almost the same image direction. A free ballistic fit can match the picture to a
 while being metres wrong in space.
 
 **Shot classification.** Rule-based serve, forehand, backhand, volley and smash, with a
-pose-based forehand and backhand upgrade via MediaPipe. The pose test is body-relative:
-whether the hitting arm crosses the shoulder midline horizontally, which makes it
-independent of handedness, facing, and which side of the court the player is on.
+pose-based forehand and backhand upgrade via MediaPipe. The forehand/backhand half of this
+is measured at 54% against ground truth and is documented under Limitations as unreliable.
+
+The pose test is body-relative: whether the hitting arm crosses the shoulder midline
+horizontally, which makes it independent of handedness, facing, and which side of the
+court the player is on. That is the right idea and it is not sufficient, because a volley
+is played with the body square to the net and the arm never crosses the midline at all.
 
 ## Measured results
 
@@ -316,6 +320,21 @@ recognised.
 - **Roughly a quarter to a third of contacts in a rally are missed** (72.0% recall on real
   detections, 95.9% precision). Reported events are overwhelmingly real, so the shot count
   is an under-count rather than noise.
+- **Forehand versus backhand is unreliable, and measured as such.** Against THETIS ground
+  truth (120 clips, 8 classes, balanced by construction) the pose geometry scores **54%**,
+  which is barely above chance on a two-class problem, and it predicts forehand **89%** of
+  the time. It is accurate on forehands (87-100%) and fails on backhands (0-47%).
+
+  Two separate causes, both measured with `eval/forehand_backhand_on_thetis.py`. Choosing
+  which wrist is the hitting hand accounts for about 24 points. The side projection itself
+  accounts for the rest: even given the correct hand it tops out at 78%, and on volleys it
+  reaches only 27%, because a volley is blocked with the body square to the net and the
+  wrist never crosses the shoulder midline the test depends on.
+
+  The label is still emitted, because the alternative rule it replaced had no basis at
+  all, but it should not be trusted. Replacing the hand-crafted geometry with a classifier
+  trained on pose sequences is the top item on the roadmap.
+
 - **Volley and smash labels come from position rules with no ground truth.** Serve is now
   detected from physical evidence. Those two are not.
 - **The learned temporal shot classifier is not wired into the pipeline.** It scores 73.4%
@@ -336,31 +355,37 @@ recognised.
 
 Ordered by measured value, not by interest.
 
-1. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
+1. **A trained forehand/backhand classifier.** The hand-crafted side projection measures
+   54% against THETIS ground truth and cannot express a volley at all. THETIS provides 12
+   labelled classes across 55 subjects, which allows subject-grouped splits, and the
+   literature (TennisTransformer, arXiv 2606.15992) shows pose sequences are the right
+   input family. This replaces geometry with something that can learn that a volley needs
+   different evidence than a groundstroke.
+2. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
    loses 16.5% of contacts, which are real events genuinely closer together than the
    window. Two candidates should merge because the trajectory says they describe one
    physical event, not because they are near each other in time. This is the largest
    remaining bucket.
-2. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
+3. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
    three generators, so they are blind to some event shape. Finding out which is a
    labelling exercise, not a modelling one.
-3. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
+4. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
    funnel shows it costs zero recall: every labelled contact has a detected ball nearby.
    It still bounds the accuracy of speeds, 3-D reconstruction and landing positions, which
    is why it stays on the list.
-4. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
+5. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
    transients that a broadcast mix carries clearly. Audio cannot say where the ball is, but
    it says precisely when it was struck, including while the ball is hidden behind a player
    or the net. It is the most promising route to the contacts no generator proposes.
-5. **Player-height-normalised contact distance.** The current threshold is a raw pixel
+6. **Player-height-normalised contact distance.** The current threshold is a raw pixel
    constant, which is wrong at different resolutions and at different depths within a single
    frame. Dividing by the player's own pixel height converts pixels to metres at that
    player's depth without needing to know the ball's height.
-6. **Geometric court detection.** The four cross-court lines have a projective-invariant
+7. **Geometric court detection.** The four cross-court lines have a projective-invariant
    cross-ratio that is identical under any camera view, so a court can be found by searching
    for that signature rather than by a learned model. This would remove the per-surface
    fine-tuning dependency entirely.
-7. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
+8. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
    and wired in, or dropped.
 
 ## Reproducing the numbers

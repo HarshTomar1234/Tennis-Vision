@@ -34,6 +34,12 @@ from __future__ import annotations
 FOREHAND = "Forehand"
 BACKHAND = "Backhand"
 
+# Maximum separation between the two wrists, as a fraction of shoulder-axis length, for
+# them to count as both being on the grip. Two hands on a racket handle sit roughly a
+# tenth of a shoulder width apart; anything wider is two arms that merely happen to be
+# equidistant from the ball.
+TWO_HANDED_MAX_GAP = 0.45
+
 Landmark = tuple[float, float, float]   # (x_px, y_px, z_px)
 
 
@@ -108,12 +114,28 @@ def classify_forehand_backhand(
         if _image_dist(hitting_pos, ball_pos) > max_contact_distance:
             return None
 
-    # If both wrists are almost equally close, we cannot say which is hitting.
+    # Both wrists similarly close to the ball has two very different causes, and
+    # collapsing them into "unknown" was throwing away the commonest stroke in tennis.
+    two_handed = False
     if len(wrists) == 2:
         d_left  = _image_dist(wrists["LEFT_WRIST"],  ball_pos)
         d_right = _image_dist(wrists["RIGHT_WRIST"], ball_pos)
         if abs(d_left - d_right) < ambiguity_ratio * axis_len:
-            return None
+            # Case 1: the hands are TOGETHER on the grip. That is a two-handed stroke,
+            # not an absence of evidence, and the pair of wrists is the hitting hand.
+            # Case 2: the hands are far apart and happen to be equidistant from the ball
+            # (camera angle, landmark error). Nothing can be read from that.
+            #
+            # The wrist separation tells them apart: two hands on a grip sit a few
+            # centimetres apart, which is a small fraction of a shoulder width.
+            lw, rw = wrists["LEFT_WRIST"], wrists["RIGHT_WRIST"]
+            gap = ((lw[0] - rw[0]) ** 2 + (lw[2] - rw[2]) ** 2) ** 0.5
+            if gap > TWO_HANDED_MAX_GAP * axis_len:
+                return None
+            two_handed = True
+            hitting_pos = ((lw[0] + rw[0]) / 2.0,
+                           (lw[1] + rw[1]) / 2.0,
+                           (lw[2] + rw[2]) / 2.0)
 
     # Project the wrist's horizontal offset from the torso centre onto the body axis.
     # Positive => wrist is toward the player's anatomical LEFT, independent of camera
@@ -121,6 +143,25 @@ def classify_forehand_backhand(
     centre = ((left_sh[0] + right_sh[0]) / 2.0, (left_sh[2] + right_sh[2]) / 2.0)
     rel    = (hitting_pos[0] - centre[0], hitting_pos[2] - centre[1])
     side   = (rel[0] * axis[0] + rel[1] * axis[1]) / axis_len
+
+    if two_handed:
+        # Both hands on the grip. Handedness cannot be read from a single frame, so the
+        # "did the hand cross the midline" test does not apply. What does apply is that
+        # the two-handed FOREHAND barely exists in tennis: a handful of professionals
+        # have ever used one, while roughly 85% of the tour plays a two-handed backhand.
+        # So hands-together is strong evidence of a backhand on its own.
+        #
+        # This is the same kind of inference as the rest of this project's shot rules:
+        # a physical fact about how the sport is played, stated openly, rather than a
+        # position heuristic. It is wrong for the rare two-handed forehand, and that is
+        # recorded here rather than hidden.
+        #
+        # Confidence reports the evidence actually used, which is how firmly the hands
+        # are together, NOT how far the grip sits off the midline. A two-handed backhand
+        # struck close to the body is still unambiguously two-handed; scoring it by
+        # midline offset would report near-zero confidence for a call the geometry
+        # supports perfectly well.
+        return (BACKHAND, max(0.0, 1.0 - gap / (TWO_HANDED_MAX_GAP * axis_len)))
 
     # Forehand = the wrist stayed on its own anatomical side.
     if hitting_name == "LEFT_WRIST":

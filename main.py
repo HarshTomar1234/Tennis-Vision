@@ -656,9 +656,21 @@ def main():
             )
             if pose_estimator.available:
                 upgraded = 0
+                # "Groundstroke" is included deliberately, and leaving it out was a
+                # bug. It is not a shot type the pipeline believes in: it is what a
+                # Volley or Smash is downgraded to when no physical evidence supported
+                # it, so it means "a ground stroke, side unknown". Those are exactly the
+                # shots pose exists to resolve, and excluding them meant the pose
+                # classifier never saw the cases that most needed it. On the reference
+                # clip that silently withheld 4 of 13 shots.
+                #
+                # Serve, Volley and Smash are still left alone: they carry genuine
+                # physical evidence (overhead reach, no bounce since the last contact)
+                # and pose has nothing to add to them.
+                UPGRADEABLE = ("Forehand", "Backhand", "Groundstroke")
                 for shot_frame, info in shot_classifications.items():
-                    if info["shot_type"] not in ("Forehand", "Backhand"):
-                        continue   # don't second-guess Serve/Volley/Smash
+                    if info["shot_type"] not in UPGRADEABLE:
+                        continue
                     # Try the contact frame first, then the nearest frames either side.
                     #
                     # The contact frame is the worst moment to ask for a pose: the player
