@@ -1065,6 +1065,26 @@ def main():
                                  f"two different players' contacts that never cross "
                                  f"the net ({t.speed_kmh:.0f} km/h)")
                     continue
+            # A speed no tennis shot has ever reached means the segment is wrong, not
+            # that the player is exceptional. The Kalman speed path has always applied
+            # this bound (constants.MAX_REALISTIC_BALL_SPEED_KMH); the 3-D
+            # reconstruction path never did, so it published a 242 km/h forehand on the
+            # reference clip. The fastest forehand on record is about 193 km/h and the
+            # fastest serve about 263, so anything above the bound is a reconstruction
+            # artifact: usually two events joined across a missed contact, which makes
+            # the flight look shorter in time than it really was.
+            # Serves are allowed the higher bound; everything else is held to the
+            # groundstroke one, because a rally ball simply does not travel at serve
+            # speed and a segment claiming it is describing a flight that never happened.
+            is_serve_flight = t.start_frame in set(serve_frames or ())
+            limit = (constants.MAX_REALISTIC_BALL_SPEED_KMH if is_serve_flight
+                     else constants.MAX_REALISTIC_GROUNDSTROKE_KMH)
+            if t.speed_kmh > limit:
+                logger.debug(f"    reject f{t.start_frame}->f{t.end_frame}: "
+                             f"{t.speed_kmh:.0f} km/h exceeds the "
+                             f"{'serve' if is_serve_flight else 'groundstroke'} bound "
+                             f"of {limit:.0f} km/h")
+                continue
             kept.append(t)
         trajectories_3d = kept
 

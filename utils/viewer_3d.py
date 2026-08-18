@@ -167,6 +167,8 @@ def _page_template() -> str:
   <button data-view="top">Top</button>
   <button data-view="baseline">Baseline</button>
   <button id="reset">Reset</button>
+  <span class="sep"></span>
+  <button id="showall">All flights</button>
   <span class="sub" id="hint">drag orbit · scroll zoom · arrows/space/R</span>
 </header>
 
@@ -309,7 +311,7 @@ function project(p) {
 
 /* ---------- state ---------- */
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-let selected = 0, playing = false, tNorm = 0, rate = 1, zoom = 1;
+let selected = 0, playing = false, tNorm = 0, rate = 1, zoom = 1, showAll = false;
 const TOTAL = DATA.segments.length ? Math.max(...DATA.segments.map(s => s.end_s)) : 1;
 
 let pending = false;
@@ -384,6 +386,19 @@ function strokePath(points, colour, width, dash) {
   ctx.setLineDash([]);
 }
 
+// Index of the flight running at `t`, or the most recent one that has ended. Returns
+// -1 before the first flight begins.
+function heldSegment(t) {
+  let best = -1, bestEnd = -Infinity;
+  DATA.segments.forEach((s, i) => {
+    if (t >= s.start_s && t < s.end_s) { best = i; bestEnd = Infinity; }
+    else if (bestEnd !== Infinity && s.end_s <= t && s.end_s > bestEnd) {
+      best = i; bestEnd = s.end_s;
+    }
+  });
+  return best;
+}
+
 function meanDepth(points) {
   let sum = 0, n = 0;
   for (const p of points) { const P = project(p); if (P) { sum += P[2]; n++; } }
@@ -422,7 +437,7 @@ function draw() {
   // twice the ink for the same information, and the shadow is a height cue for the arc
   // you are reading, not for the whole rally at once.
   DATA.segments.forEach((s, i) => {
-    const lit = i === selected || (tNorm * TOTAL >= s.start_s && tNorm * TOTAL < s.end_s);
+    const lit = i === selected || i === heldSegment(tNorm * TOTAL);
     if (lit) strokePath(s.points.map(p => [p[0], p[1], 0]), 'rgba(0,0,0,.45)', 1.4);
   });
 
@@ -476,13 +491,24 @@ function draw() {
     }
     const {i, s} = item;
     const on = i === selected;
-    const active = tNow >= s.start_s && tNow < s.end_s;
+    // "Active" holds through the gaps between flights. A rally is not continuous
+    // flight: the ball is being struck, or a reconstruction did not pass its physical
+    // gates, and on the reference clip that leaves 34% of the timeline with no segment
+    // running and up to two seconds of empty court. Holding the most recent flight
+    // keeps the view continuous without inventing anything, since it shows a real
+    // reconstruction rather than an interpolation across the gap.
+    const active = i === heldSegment(tNow);
     // Depth fog: far arcs recede instead of every arc reading at the same weight.
     const fade = Math.max(0.25, Math.min(1, 34 / item.d));
     // Seventeen arcs at similar weight read as spaghetti and hide the one being
     // examined. Context arcs are dropped to a faint trace so the rally is still legible
     // as a whole, while the selected and playing arcs carry the weight. Measured on the
     // reference clip, which has 17 flight segments over 19 seconds.
+    // Context arcs are hidden unless asked for. Sixteen faint traces crossing the court
+    // read as scratches on the lens rather than as a rally, and they compete with the
+    // one arc actually being examined. "All flights" brings them back for anyone who
+    // wants the whole point at once.
+    if (!on && !active && !showAll) continue;
     const context = Math.max(0.10, 0.16 * fade);
     const colour = on ? '#4ec9b0'
                  : active ? '#ffa657'
@@ -502,7 +528,8 @@ function draw() {
       }
     }
 
-    if (active && s.points.length > 1) {
+    const trulyFlying = tNow >= s.start_s && tNow < s.end_s;
+    if (trulyFlying && s.points.length > 1) {
       const f = (tNow - s.start_s) / Math.max(s.end_s - s.start_s, 1e-6);
       const idx = Math.min(s.points.length - 1, Math.floor(f * (s.points.length - 1)));
       const P = project(s.points[idx]);
@@ -626,6 +653,12 @@ function tick(ts) {
 /* ---------- views, keyboard, tabs ---------- */
 document.querySelectorAll('[data-view]').forEach(b =>
   b.onclick = () => { cam = {...VIEWS[b.dataset.view]}; requestDraw(); });
+const showAllBtn = document.getElementById('showall');
+showAllBtn.onclick = () => {
+  showAll = !showAll;
+  showAllBtn.classList.toggle('active', showAll);
+  requestDraw();
+};
 document.getElementById('reset').onclick = () => { cam = {az: 1.32, polar: 0.86, dist: 34}; zoom = 1; requestDraw(); };
 
 addEventListener('keydown', e => {
