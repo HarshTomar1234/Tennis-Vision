@@ -22,25 +22,25 @@ Every figure names the script that produced it. Where something is unmeasured, i
 
 **Measurement infrastructure**
 
-- `eval/ball_localization_accuracy.py` — ball position against hand-labelled ground truth,
+- `eval/ball_localization_accuracy.py` : ball position against hand-labelled ground truth,
   reporting detection rate and localization error as separate quantities. Sweeps the
   heatmap threshold and cluster size, and compares postprocessing modes.
-- `eval/event_detection_on_real_detections.py` — contact and bounce detection running real
+- `eval/event_detection_on_real_detections.py` : contact and bounce detection running real
   TrackNet inference end to end, rather than on the dataset's labelled ball coordinates.
-- `eval/event_recall_funnel.py` — attributes every missed contact to the pipeline stage
+- `eval/event_recall_funnel.py` : attributes every missed contact to the pipeline stage
   that lost it, so the next piece of work is chosen by size rather than by guess. Also
   sweeps the candidate merge window under both linkage rules.
-- `eval/serve_false_positive_check.py` — does the pipeline claim a serve on clips cut from
+- `eval/serve_false_positive_check.py` : does the pipeline claim a serve on clips cut from
   mid-rally, which is most footage a user brings.
-- `eval/pose_availability_at_contacts.py` — how often pose is usable at the moment a shot
+- `eval/pose_availability_at_contacts.py` : how often pose is usable at the moment a shot
   is struck, at the exact frame and within a small window.
-- `eval/forehand_backhand_on_thetis.py` — the geometric rule against ground truth, with an
+- `eval/forehand_backhand_on_thetis.py` : the geometric rule against ground truth, with an
   oracle mode separating a wrong hand choice from a projection that cannot express the
   answer.
-- `eval/extract_thetis_pose_features.py` and `eval/train_forehand_backhand.py` — named pose
+- `eval/extract_thetis_pose_features.py` and `eval/train_forehand_backhand.py` : named pose
   features and a classifier trained with subject-grouped splits, repeated cross-validation,
   balanced accuracy and feature ablations.
-- `eval/validate_on_broadcast_images.py` — transfer test from indoor training data to real
+- `eval/validate_on_broadcast_images.py` : transfer test from indoor training data to real
   broadcast footage.
 - `eval/swing_candidate_recall.py` and `eval/sam3d_occluded_arm_test.py`.
 
@@ -57,7 +57,7 @@ Every figure names the script that produced it. Where something is unmeasured, i
 - Optional SAM 3D Body pose backend, off by default, interface-compatible with the
   MediaPipe estimator.
 - `scripts/download_thetis.py` and `scripts/download_sam3d_body.py`.
-- `tools/LABELLING_GUIDE.md` — procedure for producing shot-type ground truth.
+- `tools/LABELLING_GUIDE.md` : procedure for producing shot-type ground truth.
 
 **Packaging**
 
