@@ -305,6 +305,13 @@ medians do separate: 2.04 for hits against 0.98 for bounces. But it reaches only
 accuracy on 1,034 labelled events, because at broadcast camera angles vertical pixel speed
 is substantially measuring depth rather than energy.
 
+**A trained forehand/backhand classifier on pose features.** Scores 76.3% balanced on
+THETIS with subject-grouped splits and repeated cross-validation, against 54% for the
+hand-crafted geometry it was built to replace. On real broadcast images it scores 53.6%,
+statistically the same as the rule, with the bias flipped rather than removed. Everything
+about the training was methodologically sound and it would still have been a regression in
+production. Kept, measured, not wired in.
+
 **"The first shot in a sequence is a serve."** This was the original serve rule. It only
 holds if a clip begins exactly at the start of a point, and ours are cut from mid-match, so
 every "Serve" the pipeline ever reported was this heuristic firing rather than a serve being
@@ -331,9 +338,29 @@ recognised.
   reaches only 27%, because a volley is blocked with the body square to the net and the
   wrist never crosses the shoulder midline the test depends on.
 
-  The label is still emitted, because the alternative rule it replaced had no basis at
-  all, but it should not be trusted. Replacing the hand-crafted geometry with a classifier
-  trained on pose sequences is the top item on the roadmap.
+  A trained classifier was built to replace it and **did not survive the transfer test**.
+  On THETIS it scores 76.3% balanced with subject-grouped splits, fixing the asymmetry
+  (forehand 78.9%, backhand 73.7%). On real broadcast images it scores **53.6%**, which is
+  the same as the rule, and the bias flips direction rather than merely weakening
+  (forehand 39.1%, backhand 68.0%). See `eval/validate_on_broadcast_images.py`.
+
+  That test is handicapped: 8 of the 20 features describe motion and a still image has
+  none, so it is a lower bound rather than a like-for-like comparison. But it is the only
+  broadcast evidence that exists, and it does not support shipping the classifier. It is
+  trained, measured and committed, and deliberately not wired into the pipeline.
+
+  The common cause of both failures is upstream. Pose extraction itself fails on backhands
+  roughly twice as often as on forehands, because the body turns away from the camera:
+
+  | class | usable pose | class | usable pose |
+  |---|---|---|---|
+  | forehand_volley | 97% | backhand_volley | **49%** |
+  | forehand_slice | 95% | backhand_slice | **54%** |
+  | forehand_flat | 88% | backhand | **62%** |
+
+  So the forehand bias has two independent sources compounding: the classifier mislabels
+  backhands, and pose disproportionately misses them. A stronger pose model is the fix,
+  not a better classifier on the same landmarks.
 
 - **Volley and smash labels come from position rules with no ground truth.** Serve is now
   detected from physical evidence. Those two are not.
@@ -355,37 +382,42 @@ recognised.
 
 Ordered by measured value, not by interest.
 
-1. **A trained forehand/backhand classifier.** The hand-crafted side projection measures
-   54% against THETIS ground truth and cannot express a volley at all. THETIS provides 12
-   labelled classes across 55 subjects, which allows subject-grouped splits, and the
-   literature (TennisTransformer, arXiv 2606.15992) shows pose sequences are the right
-   input family. This replaces geometry with something that can learn that a volley needs
-   different evidence than a groundstroke.
-2. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
+1. **Better pose on broadcast footage.** Both the geometric rule (54%) and a trained
+   classifier (53.6% on broadcast, despite 76.3% indoors) fail on the same thing: MediaPipe
+   misses backhands about twice as often as forehands, because the body turns away from the
+   camera. Every forehand/backhand approach is capped by that. SAM 3D Body is the obvious
+   candidate, being trained specifically for occlusion and unusual postures, though it is
+   gated, proprietary-licensed and too large for a 4 GB GPU.
+
+2. **Labelled broadcast video for shot types.** The transfer test above had to use still
+   images, which zeroes every motion feature and makes it a lower bound rather than a fair
+   test. `tools/label_shots.py` produces the labels; nothing else settles whether a pose
+   classifier works on real footage.
+3. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
    loses 16.5% of contacts, which are real events genuinely closer together than the
    window. Two candidates should merge because the trajectory says they describe one
    physical event, not because they are near each other in time. This is the largest
    remaining bucket.
-3. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
+4. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
    three generators, so they are blind to some event shape. Finding out which is a
    labelling exercise, not a modelling one.
-4. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
+5. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
    funnel shows it costs zero recall: every labelled contact has a detected ball nearby.
    It still bounds the accuracy of speeds, 3-D reconstruction and landing positions, which
    is why it stays on the list.
-5. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
+6. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
    transients that a broadcast mix carries clearly. Audio cannot say where the ball is, but
    it says precisely when it was struck, including while the ball is hidden behind a player
    or the net. It is the most promising route to the contacts no generator proposes.
-6. **Player-height-normalised contact distance.** The current threshold is a raw pixel
+7. **Player-height-normalised contact distance.** The current threshold is a raw pixel
    constant, which is wrong at different resolutions and at different depths within a single
    frame. Dividing by the player's own pixel height converts pixels to metres at that
    player's depth without needing to know the ball's height.
-7. **Geometric court detection.** The four cross-court lines have a projective-invariant
+8. **Geometric court detection.** The four cross-court lines have a projective-invariant
    cross-ratio that is identical under any camera view, so a court can be found by searching
    for that signature rather than by a learned model. This would remove the per-surface
    fine-tuning dependency entirely.
-8. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
+9. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
    and wired in, or dropped.
 
 ## Reproducing the numbers
