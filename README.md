@@ -343,6 +343,36 @@ medians do separate: 2.04 for hits against 0.98 for bounces. But it reaches only
 accuracy on 1,034 labelled events, because at broadcast camera angles vertical pixel speed
 is substantially measuring depth rather than energy.
 
+**Replacing MediaPipe with SAM 3D Body for forehand/backhand.** SAM 3D Body recovers the
+occluded racket arm that MediaPipe drops on 44-58% of backhands, taking usable clips from
+171 to 200 and from a 55/45 class skew to a perfect 100/100 balance. It also made the
+classifier substantially worse:
+
+| configuration | balanced | forehand | backhand |
+|---|---|---|---|
+| MediaPipe, shared clips only | **85.5%** | 83.5% | 87.4% |
+| SAM 3D, shared clips only | 66.4% | 71.6% | 61.3% |
+
+Measured on identical clips, so this is not about the extra data. The landmark mapping was
+verified against MediaPipe on frames where both succeed and agrees within 1-3 pixels, so it
+is not an integration error either.
+
+The damage is confined to position, not motion:
+
+| feature subset | MediaPipe | SAM 3D |
+|---|---|---|
+| wrist side only | 78.6% | **51.8%** (chance) |
+| speed and reach only | 63.1% | 65.8% |
+
+On frames where the arm is occluded, MediaPipe declines and SAM 3D infers the arm from a
+body prior. That inference is anatomically plausible and it is still a guess about where
+the racket is, and it destroys exactly the signal that decides forehand from backhand.
+
+The lesson is one this project already claims to hold: MediaPipe's refusal was a quality
+filter, not only a loss. A model that always answers is not better than one that knows when
+to stay quiet. The optional backend remains in the tree for its coverage, meshes and camera
+estimates, and is off by default.
+
 **A trained forehand/backhand classifier on pose features.** Scores 76.3% balanced on
 THETIS with subject-grouped splits and repeated cross-validation, against 54% for the
 hand-crafted geometry it was built to replace. On real broadcast images it scores 53.6%,
@@ -423,17 +453,18 @@ recognised.
 
 Ordered by measured value, not by interest.
 
-1. **Better pose on broadcast footage.** Both the geometric rule (54%) and a trained
-   classifier (53.6% on broadcast, despite 76.3% indoors) fail on the same thing: MediaPipe
-   misses backhands about twice as often as forehands, because the body turns away from the
-   camera. Every forehand/backhand approach is capped by that. SAM 3D Body is the obvious
-   candidate, being trained specifically for occlusion and unusual postures, though it is
-   gated, proprietary-licensed and too large for a 4 GB GPU.
+1. **Labelled broadcast video for shot types, before any more modelling.** Three
+   approaches have now been measured on forehand/backhand and none is trustworthy: the
+   geometric rule (54%), a trained classifier (76.3% indoors, 53.6% on broadcast), and
+   swapping in a stronger pose model (66.4%, worse than MediaPipe on identical clips). Each
+   was chosen on reasoning and rejected on measurement. What is missing is not a better
+   model, it is ground truth on the footage this actually runs on, which
+   `tools/label_shots.py` produces.
 
-2. **Labelled broadcast video for shot types.** The transfer test above had to use still
-   images, which zeroes every motion feature and makes it a lower bound rather than a fair
-   test. `tools/label_shots.py` produces the labels; nothing else settles whether a pose
-   classifier works on real footage.
+2. **A stronger pose model used as a supplement, not a replacement.** SAM 3D Body gives
+   100% landmark coverage, body meshes and camera parameters. Used naively it is worse than
+   MediaPipe (above), but its camera estimate is an independent check on the homography,
+   which is currently validated only by image evidence.
 3. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
    loses 16.5% of contacts, which are real events genuinely closer together than the
    window. Two candidates should merge because the trajectory says they describe one

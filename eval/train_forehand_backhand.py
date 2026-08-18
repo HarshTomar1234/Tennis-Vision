@@ -58,15 +58,16 @@ WEIGHTS_PATH = "models/forehand_backhand_classifier.json"
 RULE_ACCURACY = 0.54
 
 
-def load():
-    data = json.loads(Path(FEATURES_PATH).read_text(encoding="utf-8"))
+def load(path: str = FEATURES_PATH):
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     names = data["feature_names"]
     samples = data["samples"]
+    backend = data.get("backend", "mediapipe")
     X = np.array([s["features"] for s in samples], dtype=float)
     y = np.array([1.0 if s["label"] == "forehand" else 0.0 for s in samples])
     groups = np.array([s["subject"] for s in samples])
     classes = np.array([s["source_class"] for s in samples])
-    return names, X, y, groups, classes
+    return names, X, y, groups, classes, backend
 
 
 def train_logreg(X, y, weights, l2=1e-3, lr=0.15, steps=4000):
@@ -151,13 +152,17 @@ def summarise(name, results):
 def main():
     ap = argparse.ArgumentParser(description="Train forehand/backhand from pose features")
     ap.add_argument("--splits", type=int, default=30)
+    ap.add_argument("--features", default=FEATURES_PATH,
+                    help="feature file, so a pose backend can be swapped and compared")
+    ap.add_argument("--no-save", action="store_true",
+                    help="measure only; do not write weights")
     args = ap.parse_args()
 
-    if not Path(FEATURES_PATH).exists():
-        print(f"{FEATURES_PATH} not found. Run eval/extract_thetis_pose_features.py")
+    if not Path(args.features).exists():
+        print(f"{args.features} not found. Run eval/extract_thetis_pose_features.py")
         sys.exit(1)
-
-    names, X, y, groups, classes = load()
+    names, X, y, groups, classes, backend = load(args.features)
+    print(f"pose backend: {backend}")
     print(f"\n{len(y)} samples, {len(np.unique(groups))} subjects, {X.shape[1]} features")
     print(f"forehand {int(y.sum())}, backhand {int((1 - y).sum())}")
 
@@ -203,7 +208,7 @@ def main():
     print("-" * 40)
     print("(this last table is in-sample and only shows which strokes remain hard)")
 
-    if all_score > RULE_ACCURACY + 0.05:
+    if all_score > RULE_ACCURACY + 0.05 and not args.no_save:
         Path("models").mkdir(exist_ok=True)
         Path(WEIGHTS_PATH).write_text(json.dumps({
             "feature_names": names,
