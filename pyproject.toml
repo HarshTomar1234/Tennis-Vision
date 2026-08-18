@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tennis-vision"
+version = "0.1.0"
+description = "Measured, reproducible tennis video analysis: ball tracking, court homography, player tracking and shot classification from a single camera."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Harsh Tomar" }]
+keywords = ["tennis", "computer-vision", "sports-analytics", "object-tracking", "pose-estimation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+# Kept deliberately loose. Torch in particular must match the user's CUDA setup, and
+# pinning it here would break more installs than it fixes. requirements.txt holds the
+# exact versions this project is developed and measured against.
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "ultralytics>=8.0",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+    "mediapipe>=0.10",
+    "huggingface-hub>=0.20",
+    "gdown>=4.7",
+    # Required by ultralytics' tracking mode, which PlayerTracker uses. Absent from this
+    # list until now, so `pip install tennis-vision` produced an install that crashed on
+    # the first tracked frame while `pip install -r requirements.txt` worked.
+    "supervision>=0.27",
+    "lapx>=0.5.2",
+]
+
+[project.optional-dependencies]
+# Needed only to reproduce the published evaluation numbers or retrain.
+dev = [
+    "pytest>=7.4",
+    "transformers>=4.40",
+]
+
+[project.urls]
+Homepage = "https://github.com/HarshTomar1234/Tennis-Vision"
+Issues = "https://github.com/HarshTomar1234/Tennis-Vision/issues"
+
+[project.scripts]
+tennis-vision = "cli:main"
+
+[tool.setuptools]
+# The pipeline is organised as top-level packages rather than a src/ layout, which is
+# what the existing imports (`from utils import ...`) expect. Listed explicitly so a
+# wheel never silently picks up datasets/, output/ or notes/.
+packages = [
+    "constants",
+    # Ships models/hit_bounce_classifier.json. See models/__init__.py for why only the
+    # small weights are packaged.
+    "models",
+    "court_line_detector",
+    "mini_visual_court",
+    "trackers",
+    "utils",
+]
+py-modules = ["main", "cli"]
+
+[tool.setuptools.package-data]
+# Restricted to the small trained weights and any config carried by a package. The large
+# model files in models/ (*.pth, *.pt, *.task) are deliberately excluded: they are
+# downloaded at runtime, and two of them are not ours to redistribute.
+"*" = ["*.yaml", "*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

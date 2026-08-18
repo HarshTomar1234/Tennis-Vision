@@ -3,7 +3,7 @@
 
 ## Introduction to Visual Elements in Sports Analytics
 
-In the Tennis-Vision project, creating an effective visualization interface is crucial for communicating complex spatial data to viewers. Two fundamental techniques—Region of Interest (ROI) processing and alpha blending—form the foundation of our mini court visualization system, which provides viewers with an intuitive bird's-eye view of the match dynamics.
+In the Tennis-Vision project, creating an effective visualization interface is crucial for communicating complex spatial data to viewers. Two fundamental techniques-Region of Interest (ROI) processing and alpha blending-form the foundation of our mini court visualization system, which provides viewers with an intuitive bird's-eye view of the match dynamics.
 
 ## ROI (Region of Interest) Processing: Optimizing Visual Analysis
 
@@ -18,7 +18,7 @@ roi = frame[self.start_y:self.end_y, self.start_x:self.end_x].copy()
 This deceptively simple line performs a critical spatial extraction:
 
 - **Mathematical perspective**: It creates a sub-matrix of the video frame, specifically targeting the rectangular coordinates defined by `[self.start_y:self.end_y, self.start_x:self.end_x]`
-- **Memory efficiency**: For a 1080p video frame (1920×1080 pixels), processing the entire frame would require operations on over 2 million pixels, whereas our mini court ROI (typically 250×500 pixels) reduces this to just 125,000 pixels—a 94% reduction
+- **Memory efficiency**: For a 1080p video frame (1920×1080 pixels), processing the entire frame would require operations on over 2 million pixels, whereas our mini court ROI (typically 250×500 pixels) reduces this to just 125,000 pixels-a 94% reduction
 - **Computational optimization**: This selective processing follows the computer vision principle of attention focusing, directing computational resources only where they deliver analytical value
 
 ### Implementation Benefits
@@ -563,7 +563,7 @@ These optimizations reduce memory usage and computational overhead, enabling smo
 
 The mini court visualization represents a sophisticated blend of computer vision principles, spatial mathematics, and user interface design. By carefully implementing coordinate transformations based on foot positions and normalized offsets, we've created an intuitive visualization that maintains the spatial relationships of the tennis match while presenting them in a compact, easily understandable format.
 
-The techniques explored here—particularly the normalized offset approach and keypoint-relative positioning—have applications beyond tennis and could be adapted for any sports visualization system that needs to translate between camera space and a standardized representation of the playing area.
+The techniques explored here-particularly the normalized offset approach and keypoint-relative positioning-have applications beyond tennis and could be adapted for any sports visualization system that needs to translate between camera space and a standardized representation of the playing area.
 
 """
 

@@ -1,0 +1,27 @@
+# Pre-commit hooks. CONTRIBUTING.md tells contributors to run `pre-commit install`,
+# which needs this file to exist.
+#
+# Deliberately light. The existing codebase predates any formatter, so enabling an
+# aggressive one now would bury real changes under thousands of reformatting lines and
+# make `git blame` useless. These hooks catch mistakes rather than enforce a style.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        # Model weights and video belong in Hugging Face and locally, never in git.
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # Lint only, and only for genuine errors: undefined names, unused imports,
+      # bare excepts. No formatting, no opinionated style rules.
+      - id: ruff
+        args: ["--select=F,E9", "--fix"]

@@ -1,289 +1,563 @@
-# Tennis Detection and Analysis System
+# Tennis-Vision
+
+Tennis match analysis from a single broadcast camera: ball tracking, court geometry,
+player tracking, shot classification and 3-D trajectory reconstruction.
 
 <div align="center">
-  <img src="frame_images/tennis_analysis_quarter_frame53.png" width="800" alt="Tennis Analysis System">
-  <p><em>Computer Vision-based Tennis Match Analysis</em></p>
+  <img src="frame_images/tennis_analysis_quarter_frame53.png" width="820" alt="Annotated output frame">
 </div>
 
-## Overview
+## The one thing that makes this different
 
-This project implements a comprehensive computer vision system for tennis match analysis. It detects players and the ball, tracks their movements, analyzes shots, and provides real-time statistics. The system uses state-of-the-art computer vision techniques to extract valuable insights from tennis match videos.
+Every number this project reports carries the evidence for it, or it is not reported.
+
+That reads like a slogan, so here is what it means in practice. The pipeline refuses to
+print a serve speed when it cannot see the ball land. It flags a clip whose court fit
+failed instead of computing real-world speeds from a court fitted to the crowd. It labels
+a ball height "unknown" rather than dressing up a guess. And this README publishes the
+numbers that make the project look worse alongside the ones that make it look better,
+because the difference between them is usually the interesting part.
+
+Two examples from this repository:
+
+- Ball detection is usually quoted as a "detection rate". Ours is 88.6%. Measured against
+  hand-labelled ground truth, only **42.5%** of visible-ball frames are located within
+  5px. Both numbers are true and they measure different things.
+- Contact and bounce detection scores **87.6% recall given perfect ball positions** and
+  **72.0% running real detection end to end**. The second one is what you actually get.
+
+Every figure below names the script that produced it.
 
 ## Quickstart
 
 ```bash
-# Clone the repository
 git clone https://github.com/HarshTomar1234/Tennis-Vision.git
 cd Tennis-Vision
 
-# Install dependencies
-pip install -r requirements.txt
+python -m venv venv
+source venv/bin/activate            # Windows: venv\Scripts\activate
+pip install -e .
 
-# Run the analysis
-python main.py
-
-# View output video in output_videos/output_video.avi
+tennis-vision download-models       # about 140 MB
+tennis-vision analyze input_videos/input_video_2.mp4 -o output/demo.avi
 ```
 
-## Features
+`download-models` prints one manual step. The TrackNet ball weights belong to their
+original author and their licence is unstated, so they are fetched from that project
+rather than rehosted here. Everything else downloads automatically.
 
-- **Player Detection and Tracking**: Accurately identifies and tracks players throughout the match
-- **Ball Detection and Trajectory Analysis**: Follows the ball's path and identifies moments when shots are made
-- **Court Line Detection**: Identifies the tennis court lines for spatial reference
-- **Shot Classification**: Categorizes shots as serve, forehand, backhand, volley, or smash
-- **Mini Court Visualization**: Provides a bird's-eye view of player and ball positions
-- **Statistical Analysis**: Real-time statistics on player movement and shot speed
-- **Enhanced Visual Interface**: Clearly displays all analysis with intuitive visual elements
+Add `--max-frames 60` for a fast check before committing to a full run.
 
-## Directory Structure
+Outputs land in `output/`: an annotated video, a per-frame stats CSV, a run summary JSON,
+and an interactive 3-D viewer as a single self-contained HTML file with no external
+dependencies.
+
+## What it does
+
+**Ball tracking.** TrackNet, with the position taken from the largest connected heatmap
+response rather than the mean of all responding pixels. Ball positions map to the court
+through the floor homography only at floor level, meaning at a bounce or a racket contact.
+While the ball is airborne the floor homography does not apply to it, so those frames
+interpolate between floor-valid anchors instead of being projected as though the ball were
+on the ground.
+
+**Court geometry.** ResNet-50 keypoint regression, 14 points, re-detected per frame so
+camera pan and tilt are handled, then a real perspective homography via
+`cv2.findHomography`.
+
+**Court validity gate.** The keypoint model is a plain regression head with no way to say
+"this camera angle is outside my training distribution". On unfamiliar footage it returns a
+tidy quadrilateral that is simply not on the court, and every real-world measurement
+downstream is then computed from it and reported with full confidence. That failure is
+worse than a crash because the output looks plausible. The gate samples along every
+predicted line and asks whether those pixels are actually brighter than the surface a few
+pixels to either side. A predicted line lying on the crowd fails; one lying on paint
+passes.
+
+**Player tracking.** YOLOv8x with ByteTrack, then a six-criteria selection aggregated
+across the whole clip. Frame-zero selection was the original approach and it failed on real
+footage: on one eval clip the true player is a track id that does not exist at frame zero.
+
+**Event detection.** Three candidate generators feed a union, because each is blind to a
+different event shape. y-reversal and x-velocity are hit-shaped by construction, and a
+dedicated bounce generator covers what they miss. A trained trajectory classifier then
+splits contacts from bounces.
+
+**Serve detection and speed.** A serve is the only shot that is simultaneously struck
+above the player's head and from the baseline or behind it. Both conditions must hold, each
+is independently measurable, and a rejection reports which one failed. Speed comes from the
+contact and the landing, both floor-valid, and is not reported at all when the landing is
+never observed inside the service box.
+
+**3-D reconstruction.** Between two known contacts the ball follows a parabola whose
+curvature is gravity and whose endpoints are known heights, so there are no free
+parameters. Height is modelled from those anchors rather than measured from the image,
+because at broadcast camera angles raising the ball and pushing it further away move it in
+almost the same image direction. A free ballistic fit can match the picture to a pixel
+while being metres wrong in space.
+
+**Shot classification.** Rule-based serve, forehand, backhand, volley and smash, with a
+pose-based forehand and backhand upgrade via MediaPipe. The forehand/backhand half of this
+is measured at 54% against ground truth and is documented under Limitations as unreliable.
+
+The pose test is body-relative: whether the hitting arm crosses the shoulder midline
+horizontally, which makes it independent of handedness, facing, and which side of the
+court the player is on. That is the right idea and it is not sufficient, because a volley
+is played with the body square to the net and the arm never crosses the midline at all.
+
+## Optional: SAM 3D Body pose backend
+
+MediaPipe drops the racket arm on 44-58% of backhands (see Limitations). SAM 3D Body
+predicts a whole-body mesh and infers occluded joints instead of dropping them. On the
+exact frames MediaPipe could not complete, it returned keypoints on **6 of 6**
+(`eval/sam3d_occluded_arm_test.py`), and on a full backhand clip it completed 100% of
+frames against MediaPipe's 88%.
+
+It runs on **contact frames only**, roughly 15 per clip. At about 1.6s per frame a
+per-frame pass would take half an hour on a mid-range GPU; 30 inferences takes under a
+minute.
+
+```bash
+# 1. request access, then create a read token, then put HF_TOKEN in .env
+python scripts/download_sam3d_body.py
+
+# 2. the inference code is a separate repository
+git clone https://github.com/facebookresearch/sam-3d-body.git
+export SAM3D_BODY_CODE=/path/to/sam-3d-body
+
+# 3. enable it
+#    configs/config.yaml -> pipeline.use_sam3d_pose: true
+```
+
+Off by default, and the pipeline falls back to MediaPipe silently when the weights are
+absent.
+
+**On licensing.** The weights are under Meta's SAM License, not MIT. That licence grants
+free use, modification and derivative works, and requires anyone *redistributing* the
+materials to pass the same terms along. This project therefore does not bundle them:
+doing so would have an MIT licence make a promise about Meta's weights it has no standing
+to make. You fetch them under terms you accept directly, which is the same arrangement
+already used for the TrackNet weights.
+
+Verified working on a GTX 1050 Ti (4.3 GB) in float32. Do not wrap inference in
+`torch.autocast`: the MHR head is a TorchScript module and raises `NotImplementedError`
+inside one. Casting the weights fails in both directions as well.
+
+## Measured results
+
+Scripts marked `(dataset)` need a third-party dataset that is over 7 GB and not
+redistributable. See `datasets/README.md` for sources. Everything else runs against what
+ships in this repository plus the downloadable weights.
+
+### Ball localization
+
+Against the original TrackNet dataset's own hand-labelled coordinates, 16 clips.
+
+| Metric | Result | Script |
+|---|---|---|
+| Detection rate (a position was output, **not** an accuracy) | 88.6% | `eval/ball_localization_accuracy.py` (dataset) |
+| Localization error vs ground truth | median **5.4px**, 90th percentile 18.0px, at 360x640 | same |
+| Located within 5px of the labelled centre | 46.8% of outputs, 42.5% of visible-ball frames | same |
+
+Detection rate and accuracy are not the same measurement, and the gap here is large. The
+detector reliably finds roughly where the ball is and is not pixel-precise. That is
+adequate for trajectory shape, bounce timing and speed across a flight. It is marginal for
+exact landing coordinates.
+
+It is worth being precise about what this does and does not cost. It bounds the accuracy of
+speeds, 3-D reconstruction and landing positions. It does **not** cost event recall: the
+funnel below shows every labelled contact has a detected ball near it, so nothing is missed
+for want of a detection.
+
+### Contact and bounce event detection
+
+Two questions with very different answers. Both are published, because the gap between
+them is the honest cost of detection noise.
+
+**Given perfect ball positions**, feeding the dataset's labelled coordinates straight into
+the candidate generators. This isolates the generators and is an upper bound, not shipped
+behaviour. 91 clips.
+
+| Configuration | Recall | Precision | Script |
+|---|---|---|---|
+| y-reversal only | 75.8% | 88.9% | `eval/retest_union_candidates_full_pipeline.py` (dataset) |
+| y-reversal + x-velocity union | 87.6% | 90.3% | same |
+
+**Running real detection end to end**, which is what the pipeline does. 10 clips, 76
+labelled contacts, trajectory classifier only.
+
+| Configuration | Recall | Precision | F1 | Mean offset |
+|---|---|---|---|---|
+| mean of all heatmap pixels, chained clustering | 48.7% | 92.5% | 0.638 | 3.6 frames |
+| largest connected component, chained clustering | 51.3% | 92.9% | 0.661 | 3.2 frames |
+| **largest connected component, bounded clustering** (shipped) | **68.4%** | **92.9%** | **0.788** | **2.4 frames** |
+
+Script: `eval/event_detection_on_real_detections.py` (dataset). Rows above are the same 10
+clips throughout so the comparison is controlled.
+
+On a wider 25-clip sample, 164 labelled contacts:
+
+| Metric | Result |
+|---|---|
+| Recall | **72.0%** |
+| Precision | **95.9%** |
+| F1 | **0.822** |
+| Mean offset | 2.4 frames |
+| Per-clip recall | min 50%, median 71%, max 100% |
+| Clips below 40% recall | **0 of 25** |
+
+The per-clip row matters more than the aggregate. A 72% mean could hide clips that fail
+completely, and it does not: the worst clip in the sample still recovers half its contacts,
+and none scores zero.
+
+Where the remaining misses go, attributed by `eval/event_recall_funnel.py` across 12 clips
+and 91 labelled contacts:
+
+| Stage | Share of all contacts |
+|---|---|
+| reported | 68.1% |
+| ball never detected nearby | **0.0%** |
+| no candidate proposed | 15.4% |
+| lost in candidate merging | 16.5% |
+| rejected by the classifier | **0.0%** |
+
+Detection reaches every labelled contact and the classifier discards none. Everything still
+missing is lost in candidate generation or in merging, which is the opposite of what this
+project assumed before the funnel existed.
+
+### Hit versus bounce classification
+
+Trajectory-only logistic regression on ball height, vertical and horizontal velocity
+change, and whether the ball reversed horizontally. No player position needed. Trained on
+820 events, tested on 214 held out, split by clip rather than by event so camera, lighting
+and player correlations cannot leak.
+
+**86.4% held-out accuracy.** See `eval/train_hit_bounce_classifier.py`.
+
+The feature set was chosen on end-to-end F1, not on this accuracy, and the two disagree:
+
+| Features | Held-out accuracy | End-to-end shot F1 |
+|---|---|---|
+| height, vertical, horizontal | 84.1% | 0.737 |
+| plus raw signed velocities | **89.3%** | **0.600** |
+| plus horizontal reversal (shipped) | 86.4% | **0.824** |
+
+The most accurate model on the benchmark is the worst in the product. The cause is a train
+and serve mismatch: the dataset's velocities come from hand-annotated positions, while the
+pipeline computes them from real detections with interpolated gaps. Raw signed velocities
+took the largest weights and did not survive contact with real data.
+
+### Court keypoints
+
+Held-out validation split of the TennisCourtDetector dataset, 2,211 images.
+
+| Metric | Base weights | Fine-tuned (shipped) | Script |
+|---|---|---|---|
+| Median keypoint error | 4.03px | **2.90px** | `eval/court_keypoint_accuracy.py` (dataset) |
+| Images with all 14 keypoints within 25px | 96.8% | **98.3%** | same |
+| Real clips passing the court-validity gate | 4/9 | **8/9** | `eval/court_validity_calibration.py` (dataset) |
+
+Fine-tuned with geometric augmentation only: translation, scale, perspective and flip.
+Per-surface error is near-identical (hard 3.90px, clay 4.58px, grass 4.65px), so surface is
+not the weakness. Camera framing is. Validated on Wimbledon grass the model had never seen.
+
+The validity gate was calibrated by measurement, and one obvious approach was discarded:
+homography reprojection error is useless for this. Across 9 clips it ranged 1.40 to 1.88px
+on correct fits and 2.13px on a visibly wrong one, with 14 of 14 RANSAC inliers every time.
+It measures whether the 14 points are self-consistent, and a tidy quadrilateral on the
+stands is perfectly self-consistent.
+
+### Serve speed
+
+Validated against broadcast radar, which is third-party ground truth rather than a
+self-generated reference.
+
+| Clip | Pipeline | Broadcast radar |
+|---|---|---|
+| 1 | 213.4 km/h | 214.0 km/h |
+| 2 | 164.1 km/h | 177.0 km/h |
+
+Mean ratio 0.96, always at or below radar, which is what aerodynamic drag predicts given
+that radar reads at racket contact. Reproduce with `eval/serve_speed_accuracy.py`.
+
+### Reference clip, end to end
+
+One clip with 7 hand-labelled shots. Listed because it is the reproducible demo, not
+because 7 events settle anything. The dataset-scale numbers above are the ones to trust,
+and on precision they disagree with this clip.
+
+| Metric | Result | Script |
+|---|---|---|
+| Shot-frame recall | 7/7 found, mean offset 7.4 frames | `eval/shot_frame_accuracy.py` |
+| Shot-frame precision | 58.3%, 5 false positives in 12 reported, F1 0.74 | same |
+| Ball speed plausibility (a range check, **not** accuracy) | 21/21 within physical bounds | `eval/speed_accuracy.py` |
+
+### Test suite
+
+**204 unit and integration tests** (`pytest tests/`), covering ball-state classification,
+Kalman and RTS smoothing including the physical speed-plausibility gate, mini-court
+coordinate mapping, trajectory drawing, pose-based shot classification, the hit and bounce
+classifier and its feature contract, TrackNet postprocessing geometry, detection-cache
+keying, and packaging integrity.
+
+The end-to-end smoke test runs genuine fresh detection and depends on no cached artefacts,
+so it fails for everyone if the pipeline breaks.
+
+## What we tried that did not work
+
+Published because negative results are expensive to produce and cheap to reuse. Each of
+these was implemented, measured, and rejected on the number.
+
+**Homography reprojection error as a court-validity signal.** Cannot distinguish a court
+fitted to the court from one fitted to the stands, for the reason given above.
+
+**Raising the ball detector's heatmap threshold, and changing its minimum cluster size.**
+Thresholds from 0 to 128 and cluster sizes from 3 to 10 all land within noise of each other.
+The shipped configuration is already at its optimum for this postprocess. The remaining
+error is in the network's output, not in how it is thresholded.
+
+**A larger or newer YOLO for player detection.** Detection is already saturated: on the
+reference clip YOLOv8x finds 11 to 14 people per frame and the pipeline needs 2. The hard
+problem is selecting which two are the players, which is our own logic, not the detector's.
+
+**RTS forward-backward smoothing of the ball trajectory.** Buys complete coverage and about
+1.5 points of recall for 4% worse median error. Two useful findings came out of it.
+Smoothing across a contact is measurably worse than smoothing between contacts, because a
+racket hit changes velocity discontinuously and a constant-velocity smoother run through
+one blends the incoming and outgoing velocities. And even applied per flight span it does
+not improve median error, because TrackNet's error is not Gaussian: a 5.4px median against
+an 18.0px 90th percentile is a heavy tail of gross mislocalizations, and a Kalman smoother
+spreads those into neighbouring good frames instead of rejecting them. Shipped as a tested
+utility, off by default.
+
+**A chi-square outlier gate in front of that smoother.** Catastrophic on real data, taking
+median error from 6.3px to 29.4px, and to 207.9px at tight tuning. It diverges: the
+constant-velocity prediction is too poor to serve as a reference, so the gate rejects
+correct measurements and coasts on a wrong track. Gating is the right idea for choosing
+among several candidate detections per frame, which is a different job. Our postprocess
+emits exactly one position, so a gate can only discard.
+
+**The ratio of outgoing to incoming vertical speed as a bounce signal.** The physics is
+sound, since a floor bounce can only lose vertical speed while a racket adds it, and the
+medians do separate: 2.04 for hits against 0.98 for bounces. But it reaches only 65.7%
+accuracy on 1,034 labelled events, because at broadcast camera angles vertical pixel speed
+is substantially measuring depth rather than energy.
+
+**Replacing MediaPipe with SAM 3D Body for forehand/backhand.** SAM 3D Body recovers the
+occluded racket arm that MediaPipe drops on 44-58% of backhands, taking usable clips from
+171 to 200 and from a 55/45 class skew to a perfect 100/100 balance. It also made the
+classifier substantially worse:
+
+| configuration | balanced | forehand | backhand |
+|---|---|---|---|
+| MediaPipe, shared clips only | **85.5%** | 83.5% | 87.4% |
+| SAM 3D, shared clips only | 66.4% | 71.6% | 61.3% |
+
+Measured on identical clips, so this is not about the extra data. The landmark mapping was
+verified against MediaPipe on frames where both succeed and agrees within 1-3 pixels, so it
+is not an integration error either.
+
+The damage is confined to position, not motion:
+
+| feature subset | MediaPipe | SAM 3D |
+|---|---|---|
+| wrist side only | 78.6% | **51.8%** (chance) |
+| speed and reach only | 63.1% | 65.8% |
+
+On frames where the arm is occluded, MediaPipe declines and SAM 3D infers the arm from a
+body prior. That inference is anatomically plausible and it is still a guess about where
+the racket is, and it destroys exactly the signal that decides forehand from backhand.
+
+The lesson is one this project already claims to hold: MediaPipe's refusal was a quality
+filter, not only a loss. A model that always answers is not better than one that knows when
+to stay quiet. The optional backend remains in the tree for its coverage, meshes and camera
+estimates, and is off by default.
+
+**A trained forehand/backhand classifier on pose features.** Scores 76.3% balanced on
+THETIS with subject-grouped splits and repeated cross-validation, against 54% for the
+hand-crafted geometry it was built to replace. On real broadcast images it scores 53.6%,
+statistically the same as the rule, with the bias flipped rather than removed. Everything
+about the training was methodologically sound and it would still have been a regression in
+production. Kept, measured, not wired in.
+
+**"The first shot in a sequence is a serve."** This was the original serve rule. It only
+holds if a clip begins exactly at the start of a point, and ours are cut from mid-match, so
+every "Serve" the pipeline ever reported was this heuristic firing rather than a serve being
+recognised.
+
+## Limitations
+
+**Wrong or unvalidated today:**
+
+- **Rally and groundstroke speeds are unvalidated.** 3-D reconstruction produces 29 to 112
+  km/h with a mean of 67, and the physics is verified, but no ground truth exists for
+  non-serve shots. Serve speed is validated; rally speed is not.
+- **Roughly a quarter to a third of contacts in a rally are missed** (72.0% recall on real
+  detections, 95.9% precision). Reported events are overwhelmingly real, so the shot count
+  is an under-count rather than noise.
+- **Forehand versus backhand is unreliable, and measured as such.** Against THETIS ground
+  truth (120 clips, 8 classes, balanced by construction) the pose geometry scores **54%**,
+  which is barely above chance on a two-class problem, and it predicts forehand **89%** of
+  the time. It is accurate on forehands (87-100%) and fails on backhands (0-47%).
+
+  Two separate causes, both measured with `eval/forehand_backhand_on_thetis.py`. Choosing
+  which wrist is the hitting hand accounts for about 24 points. The side projection itself
+  accounts for the rest: even given the correct hand it tops out at 78%, and on volleys it
+  reaches only 27%, because a volley is blocked with the body square to the net and the
+  wrist never crosses the shoulder midline the test depends on.
+
+  A trained classifier was built to replace it and **did not survive the transfer test**.
+  On THETIS it scores 76.3% balanced with subject-grouped splits, fixing the asymmetry
+  (forehand 78.9%, backhand 73.7%). On real broadcast images it scores **53.6%**, which is
+  the same as the rule, and the bias flips direction rather than merely weakening
+  (forehand 39.1%, backhand 68.0%). See `eval/validate_on_broadcast_images.py`.
+
+  That test is handicapped: 8 of the 20 features describe motion and a still image has
+  none, so it is a lower bound rather than a like-for-like comparison. But it is the only
+  broadcast evidence that exists, and it does not support shipping the classifier. It is
+  trained, measured and committed, and deliberately not wired into the pipeline.
+
+  The common cause of both failures is upstream, and it is more specific than "pose
+  fails". MediaPipe finds the player on **100%** of frames and then omits the landmarks of
+  the occluded arm. On a backhand that is the racket arm:
+
+  | class | frames | no pose | most-missing landmarks |
+  |---|---|---|---|
+  | backhand_volley | 117 | 0 | right elbow 68%, right wrist **58%** |
+  | backhand | 142 | 0 | right elbow 47%, right wrist **44%** |
+  | forehand_volley | 120 | 0 | left elbow 9%, left wrist 5% |
+  | forehand_flat | 146 | 0 | left elbow 25%, left wrist 23% |
+
+  Forehand versus backhand is decided by where that arm is, so both classifiers are
+  reading a hand that is often not there. That is why a stronger pose model is the fix
+  rather than a better classifier on the same landmarks, and it is measured by
+  `eval/pose_availability_at_contacts.py`.
+
+- **Volley and smash labels come from position rules with no ground truth.** Serve is now
+  detected from physical evidence. Those two are not.
+- **The learned temporal shot classifier is not wired into the pipeline.** It scores 73.4%
+  on unseen subjects across 6 classes, but it is trained on THETIS indoor demonstration
+  footage and its transfer to broadcast video is unmeasured.
+- **Player detection has no ground-truth eval.**
+- **Ball height is modelled, not measured**, and cannot be otherwise from this camera
+  geometry. It is anchored at known contact heights and interpolated by gravity, so it
+  degrades whenever a contact is missed.
+
+**Out of scope right now:**
+
+- **Ground-level cameras fail.** Validated on broadcast and elevated fixed-camera footage
+  only. The validity gate flags these rather than reporting wrong numbers.
+- **Doubles and amateur footage are untested.** Every evaluation clip is broadcast singles.
+
+## Roadmap
+
+Ordered by measured value, not by interest.
+
+1. **Labelled broadcast video for shot types, before any more modelling.** Three
+   approaches have now been measured on forehand/backhand and none is trustworthy: the
+   geometric rule (54%), a trained classifier (76.3% indoors, 53.6% on broadcast), and
+   swapping in a stronger pose model (66.4%, worse than MediaPipe on identical clips). Each
+   was chosen on reasoning and rejected on measurement. What is missing is not a better
+   model, it is ground truth on the footage this actually runs on, which
+   `tools/label_shots.py` produces.
+
+2. **A stronger pose model used as a supplement, not a replacement.** SAM 3D Body gives
+   100% landmark coverage, body meshes and camera parameters. Used naively it is worse than
+   MediaPipe (above), but its camera estimate is an independent check on the homography,
+   which is currently validated only by image evidence.
+3. **A smarter merge decision.** A fixed frame window is the wrong instrument: it still
+   loses 16.5% of contacts, which are real events genuinely closer together than the
+   window. Two candidates should merge because the trajectory says they describe one
+   physical event, not because they are near each other in time. This is the largest
+   remaining bucket.
+4. **Candidate generation.** A further 15.4% of contacts are never proposed by any of the
+   three generators, so they are blind to some event shape. Finding out which is a
+   labelling exercise, not a modelling one.
+5. **Ball localization.** Median 5.4px, 18.0px tail. Demoted from first place, because the
+   funnel shows it costs zero recall: every labelled contact has a detected ball nearby.
+   It still bounds the accuracy of speeds, 3-D reconstruction and landing positions, which
+   is why it stays on the list.
+6. **Audio impact detection.** A racket strike and a floor bounce are sharp broadband
+   transients that a broadcast mix carries clearly. Audio cannot say where the ball is, but
+   it says precisely when it was struck, including while the ball is hidden behind a player
+   or the net. It is the most promising route to the contacts no generator proposes.
+7. **Player-height-normalised contact distance.** The current threshold is a raw pixel
+   constant, which is wrong at different resolutions and at different depths within a single
+   frame. Dividing by the player's own pixel height converts pixels to metres at that
+   player's depth without needing to know the ball's height.
+8. **Geometric court detection.** The four cross-court lines have a projective-invariant
+   cross-ratio that is identical under any camera view, so a court can be found by searching
+   for that signature rather than by a learned model. This would remove the per-surface
+   fine-tuning dependency entirely.
+9. **Broadcast ground truth for shot types**, so the temporal classifier can be validated
+   and wired in, or dropped.
+
+## Reproducing the numbers
+
+```bash
+pip install -e ".[dev]"
+pytest tests/                                       # 204 tests
+
+python eval/shot_frame_accuracy.py                  # reference clip, ships with repo
+python eval/speed_accuracy.py                       # reference clip, ships with repo
+
+python eval/ball_localization_accuracy.py --clips 16          # needs dataset
+python eval/event_detection_on_real_detections.py --compare   # needs dataset
+python eval/train_hit_bounce_classifier.py                    # needs dataset
+python eval/court_keypoint_accuracy.py                        # needs dataset
+```
+
+## Repository layout
 
 ```
-Tennis-Vision/
-├── analysis/               # Analysis utilities and algorithms
-├── constants/              # Project constants and configuration
-├── court_line_detector/    # Court line detection module
-├── frame_images/           # Extracted video frames for analysis
-├── input_videos/           # Input tennis match videos
-├── mini_visual_court/      # Mini court visualization module
-├── models/                 # Trained ML models
-│   ├── keypoints_model.pth # Court keypoint detection model
-│   └── last.pt             # Ball detection model
-├── output_videos/          # Processed videos with analysis 
-├── runs/                   # Training runs and logs
-├── trackers/               # Object tracking modules
-│   ├── ball_tracker.py     # Ball tracking implementation
-│   └── player_tracker.py   # Player tracking implementation
-├── tracker_stubs/          # Serialized tracking data for development
-├── training/               # Training scripts and utilities
-├── utils/                  # Utility functions
-│   ├── bbox_utils.py       # Bounding box utilities
-│   ├── conversions.py      # Unit conversion utilities
-│   ├── drawing_utils.py    # Visualization utilities
-│   ├── player_stats_drawer_utils.py # Player statistics visualization
-│   ├── shot_classifier.py  # Shot classification implementation
-│   └── video_utils.py      # Video handling utilities
-├── main.py                 # Main application entry point
-├── requirements.txt        # Project dependencies
-└── yolov8x.pt              # YOLOv8 model for player detection
+configs/              config.yaml, every tunable parameter
+constants/            court dimensions, physical plausibility bounds
+court_line_detector/  ResNet-50 court keypoint regression
+eval/                 every number in this README traces to a script here
+mini_visual_court/    mini-court mapping and trajectory drawing
+models/               small trained weights (committed); large weights fetched by script
+notes/                CV concept write-ups
+scripts/              download_models.py, build_clip_suite.py
+tests/                204 unit and integration tests
+tools/                label_shots.py, keyboard-driven contact and bounce labelling
+trackers/             tracknet_ball_tracker.py, player_tracker.py
+training/             court keypoint and shot classifier training
+utils/                ball_state, court_validity, hit_bounce_classifier, kalman_smoother,
+                      serve_detector, serve_landing, trajectory_3d, viewer_3d, and more
+main.py               pipeline entry point
+cli.py                tennis-vision command
 ```
 
-## Installation
+## Notes on the CV concepts
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/HarshTomar1234/Tennis-Vision.git
-   cd Tennis-Vision
-   ```
+Written while building, in `notes/`:
 
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. Download the required models:
-   - YOLOv8x model for player detection
-   - Court keypoint detection model
-   - Ball detection model
-
-## Usage
-
-### Basic Usage
-
-Run the main script with a tennis video:
-
-```
-python main.py
-```
-
-By default, the script will:
-- Process the video at `input_videos/input_video.mp4`
-- Generate an output video with analysis at `output_videos/output_video.avi`
-
-### Customization
-
-Edit the `main.py` file to customize:
-- Input video path
-- Detection thresholds
-- Visual styling
-- Analysis parameters
-
-## Example Input/Output
-
-### Input Video
-
-The demo uses tennis match footage from professional tournaments. The project includes a sample input video:
-- Location: `input_videos/input_video.mp4` (12MB)
-- Content: Professional tennis match with clear court visibility and player movements
-- Duration: ~9 seconds at 24 FPS (214 frames)
-
-### Output Visualization
-
-The system produces a video with comprehensive visual analysis:
-
-#### Output Video
-- Location: `output_videos/output_video.avi` (6.5MB)
-- Alternative format: `output_videos/output_video.mp4` (6.4MB)
-- Resolution: Matches input video
-- Content: Enhanced visualization with player tracking, shot classification, and statistics
-
-#### Visual Breakdown
-
-![Beginning of Match](frame_images/tennis_analysis_beginning_frame0.png)
-*Initial state of the analysis at the start of the match*
-
-![Mid-Match Analysis](frame_images/tennis_analysis_middle_frame107.png)
-*Analysis during an active rally showing player positions, ball trajectory, and shot classification*
-
-![Shot Analysis](frame_images/tennis_analysis_sixty_percent_frame128.png)
-*Detailed shot analysis with player statistics and shot classification*
-
-#### Key Visual Elements
-
-1. **Player Stats Board**: Located at the center bottom, displays player speeds and shot information
-2. **Shot Analysis Panel**: Located on the left side, shows recent shots with color-coded indicators
-3. **Shot Type Legend**: Located at the bottom right, explains the shot type abbreviations and colors
-4. **Player Tracking**: Bounding boxes track players with real-time position data
-5. **Ball Tracking**: Highlights the ball position and trajectory
-6. **Mini Court View**: Top-right corner visualization showing bird's-eye view of the match
-
-## Technical Details
-
-### Model Performance Metrics
-
-Our system achieves high accuracy across all detection tasks with the following performance characteristics:
-
-#### **Ball Detection Model (Custom YOLOv8)**
-- **Training Dataset**: 578 annotated images (428 train, 100 validation, 50 test)
-- **Detection Confidence**: 0.15 threshold for initial detection, 0.6 for final filtering
-- **Accuracy Metrics**:
-  - **mAP@0.5**: ~87.3% (Mean Average Precision at IoU threshold 0.5)
-  - **mAP@0.5:0.95**: ~72.1% (Mean Average Precision across IoU thresholds 0.5-0.95)
-  - **Precision**: 89.2% (True Positives / Total Predicted Positives)
-  - **Recall**: 85.7% (True Positives / Total Actual Positives)
-- **Performance Characteristics**:
-  - Handles balls as small as 5-40 pixels in diameter
-  - Maintains 0.7-1.3 aspect ratio constraints for circular ball shape
-  - Processing speed: ~0.15 seconds per frame after optimization
-
-#### **Player Detection (YOLOv8x)**
-- **Model**: Pre-trained YOLOv8x with fine-tuning for tennis scenarios
-- **Detection Confidence**: 0.7 threshold for high-precision tracking
-- **Accuracy Metrics**:
-  - **mAP@0.5**: ~92.8% for person class detection
-  - **Tracking Accuracy**: 94.3% successful player identification
-  - **False Positive Rate**: <3% with size filtering (minimum 20x50 pixels)
-- **Performance Optimization**:
-  - Court-position based player filtering
-  - Multi-frame consistency checking
-  - Real-time tracking with position prediction
-
-#### **Court Keypoint Detection (ResNet-50)**
-- **Architecture**: ResNet-50 backbone with 28-point keypoint output (14 court landmarks)
-- **Input Resolution**: 224x224 pixels with perspective correction
-- **Accuracy Metrics**:
-  - **Keypoint Accuracy**: ~91.5% within 5-pixel tolerance
-  - **Court Registration Success**: 96.8% successful court alignment
-  - **Processing Speed**: Single frame analysis per video (optimized approach)
-
-### Player Detection
-
-The system uses YOLOv8, a state-of-the-art object detection model, to identify and track players on the court. The player tracking pipeline includes:
-
-1. Initial detection using YOLOv8x with 92.8% mAP@0.5 accuracy
-2. Player identification based on court position and proximity analysis
-3. Frame-to-frame tracking with position prediction and consistency validation
-4. Confidence-based filtering (threshold: 0.7) with size constraints
-
-### Ball Detection and Tracking
-
-Ball detection utilizes a specialized YOLOv8 model trained specifically on tennis footage. The tracking algorithm achieves 87.3% mAP@0.5 accuracy:
-
-1. Applies the detection model to identify ball candidates (confidence threshold: 0.15)
-2. Filters detections based on size (5-40px), shape (aspect ratio 0.7-1.3), and motion
-3. Advanced interpolation using polynomial + linear methods with 5-frame smoothing window
-4. Identifies shot moments using trajectory analysis with rolling mean calculations
-5. Final confidence filtering (threshold: 0.6) for precision enhancement
-
-### Court Line Detection
-
-The court detection module identifies tennis court structure with 91.5% keypoint accuracy using:
-
-1. ResNet-50 based keypoint detection for 14 court landmarks
-2. Perspective transformation to map court coordinates accurately
-3. Robust line fitting to handle partial occlusions and varying court surfaces
-4. Single-frame analysis optimized for computational efficiency
-
-### Shot Classification
-
-The shot classifier uses a rule-based approach with 89.4% accuracy, analyzing:
-
-1. Player position relative to the court and net (150px volley threshold)
-2. Ball trajectory analysis using vertical displacement patterns
-3. Temporal context of the rally and shot sequence
-4. Player orientation and movement relative to court boundaries
-5. Court positioning rules for serve identification (first shot detection)
-
-**Classification Accuracy by Shot Type:**
-- **Serve**: 95.2% accuracy (rule-based first-shot detection)
-- **Forehand**: 87.8% accuracy (dominant side position analysis)
-- **Backhand**: 86.1% accuracy (cross-body trajectory detection)
-- **Volley**: 91.3% accuracy (net proximity + quick ball contact)
-- **Smash**: 93.7% accuracy (overhead trajectory + downward ball motion)
-
-Based on these factors, shots are classified as:
-
-- **Serve**: First shot of a rally (orange visualization)
-- **Forehand**: Standard shot with racket on dominant side (green visualization)
-- **Backhand**: Shot with racket across body (blue visualization)
-- **Volley**: Shot near the net without bounce (cyan visualization)
-- **Smash**: Overhead shot with downward trajectory (red visualization)
-
-### Performance Optimization & IoU Analysis
-
-**System-wide Performance Metrics:**
-- **Overall Processing Speed**: 6.67 FPS (0.15 seconds per frame)
-- **Memory Efficiency**: 94% reduction through ROI processing (2M pixels → 125K pixels)
-- **Real-time Capability**: Suitable for near real-time analysis with GPU acceleration
-
-**IoU (Intersection over Union) Performance:**
-- **Ball Detection IoU**: Average 0.73 (excellent overlap for small objects)
-- **Player Detection IoU**: Average 0.84 (high precision bounding boxes)
-- **Court Registration**: Sub-pixel accuracy with 96.8% successful alignment
-
-**Detection Confidence Thresholds Optimization:**
-- Player detection: 0.7 threshold reduces false positives to <3%
-- Ball detection: Dual-threshold approach (0.15 initial, 0.6 final) balances recall vs precision
-- Court keypoints: Single-frame analysis with 5-pixel tolerance maintains 91.5% accuracy
-
-## Future Enhancements
-
-The system can be extended with:
-
-- **Player Pose Estimation**: Analyze player technique and form
-- **Tactical Pattern Recognition**: Identify recurring strategies and patterns
-- **Match Statistics Aggregation**: Compile comprehensive match statistics
-- **Multi-Camera Support**: Synchronize and analyze footage from multiple cameras
-- **Real-Time Processing**: Optimize for live analysis during matches
-- **Player Identification**: Automatically identify specific players
-
-## Requirements
-
-The project requires the following dependencies, listed in `requirements.txt`:
-
-- OpenCV for image processing
-- PyTorch for neural network models
-- NumPy for numerical operations
-- Pandas for data analysis
-- YOLOv8 for object detection
+- `01_homography_basics.md`, court coordinate transformation
+- `02_kalman_filter.md`, ball trajectory smoothing
+- `03_temporal_smoothing.md`, keypoint jitter reduction
+- `04_sort_tracker.md`, multi-object tracking
+- `05_deepsort_reid.md`, re-identification
+- `06_shot_detection.md`, shot classification methodology
 
 ## Credits
 
-This project builds upon research and implementations in computer vision and sports analysis domains:
+- **TrackNet** ([yastrebksv/TrackNet](https://github.com/yastrebksv/TrackNet)), ball
+  detection weights and the labelled dataset behind every event-detection number here
+- **TennisCourtDetector**, the court keypoint dataset behind the fine-tuned model
+- **Ultralytics YOLOv8**, player detection
+- **MediaPipe**, pose estimation
+- **THETIS**, shot type dataset
+- PyTorch, OpenCV, NumPy, pandas
 
-- YOLOv8 for object detection
-- OpenCV for image processing
-- PyTorch for deep learning components
+The court keypoint model published at
+[Coddieharsh/tennis-court-keypoints](https://huggingface.co/Coddieharsh/tennis-court-keypoints)
+is a derivative fine-tune, with a model card recording provenance and per-surface accuracy.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The one rule specific to this project: a new number
+needs a script in `eval/` that produces it, and that script goes in the same commit.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).

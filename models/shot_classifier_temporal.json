@@ -1,0 +1,28 @@
+{
+  "classes": [
+    "backhand",
+    "backhand2hands",
+    "backhand_slice",
+    "forehand_flat",
+    "forehand_openstands",
+    "forehand_slice"
+  ],
+  "seq_len": 32,
+  "n_features": 24,
+  "landmarks": [
+    "LEFT_SHOULDER",
+    "RIGHT_SHOULDER",
+    "LEFT_ELBOW",
+    "RIGHT_ELBOW",
+    "LEFT_WRIST",
+    "RIGHT_WRIST",
+    "LEFT_HIP",
+    "RIGHT_HIP"
+  ],
+  "grouped_cv_accuracy": 0.7344,
+  "folds": 4,
+  "n_clips": 241,
+  "n_subjects": 16,
+  "trained_on": "THETIS (indoor demonstration footage, NOT broadcast tennis)",
+  "caveat": "Accuracy is measured on held-out THETIS subjects. It is not evidence of accuracy on broadcast footage and must not be quoted as such."
+}

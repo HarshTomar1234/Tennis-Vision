@@ -1,575 +1,584 @@
+"""
+mini_visual_court/mini_court.py
+───────────────────────────────
+Top-down 2-D court overlay rendered in a corner of every output frame.
+Handles both coordinate mapping (video frame → mini-court) and rendering.
+
+Coordinate mapping pipeline
+----------------------------
+Primary  : cv2.findHomography (14-point RANSAC) - perspective-correct.
+Fallback : nearest keypoint + normalised linear offset - used only when
+           RANSAC finds fewer than 4 inliers (severely noisy detections).
+
+Speed calculation accuracy
+---------------------------
+Every position is in mini-court pixel space.  The physical scale factor is
+    1 px  =  DOUBLE_LINE_WIDTH / court_drawing_width  metres
+applied identically to X and Y because the drawing is laid out with the same
+_meters_to_px helper in both axes, preserving the court's true aspect ratio.
+"""
+from __future__ import annotations
+
+import logging
+
 import cv2
-import sys
 import numpy as np
-import random  # Adding random for ball position offsets
-sys.path.append("../")
-import constants 
-from utils import convert_meters_to_pixel_distance, convert_pixel_distance_to_meters , get_foot_position, get_closest_keypoint_index, get_height_of_bbox, measure_xy_distance, get_center_of_bbox, measure_distance_between_points
+
+import constants
+from utils import (
+    convert_meters_to_pixel_distance,
+    convert_pixel_distance_to_meters,
+    measure_distance_between_points,
+    measure_xy_distance,
+)
+
+logger = logging.getLogger(__name__)
 
 
-class MiniCourt():
-    def __init__(self, frame, mini_court_width=None, mini_court_height=None):
+# ── Module-level visual constants (BGR) ───────────────────────────────────────
+_COURT_FILL   = (176, 127,  89)   # terracotta hard-court surface
+_LINE_COLOR   = (  0,   0,   0)   # black court lines
+_NET_COLOR    = ( 30,  30, 180)   # dark-red net
+_KP_OUTLINE   = (  0,   0,   0)
+_KP_FILL      = (  0,   0, 255)   # red keypoint markers
+_PLAYER_BG    = (  0,   0,   0)
+_PLAYER_FILL  = (  0, 180,   0)   # green player dots
+_BALL_BG      = (  0,   0,   0)
+_BALL_FILL    = (128,   0, 128)   # purple ball dot
+
+
+class MiniCourt:
+    """Top-down 2-D tennis court overlay with perspective-correct coordinate mapping."""
+
+    _MIN_COURT_W    = 180     # minimum drawing width  (px)
+    _MIN_COURT_H    = 360     # minimum drawing height (px)
+    _PADDING        = 15      # gap between background box edge and court lines (px)
+    _WIDTH_FRAC     = 0.18    # default width as fraction of video frame width
+
+    def __init__(
+        self,
+        frame: np.ndarray,
+        mini_court_width:  int | None  = None,
+        mini_court_height: int | None  = None,
+        layout_params:     dict | None = None,
+    ) -> None:
         """
-        Initialize mini court with enhanced styling and dimensions
+        Args:
+            frame:             First video frame - used to derive default dimensions.
+            mini_court_width:  Fixed pixel width (ignored when layout_params provided).
+            mini_court_height: Fixed pixel height (ignored when layout_params provided).
+            layout_params:     Dict from UILayoutManager.get_mini_court_params().
+                               Expected keys: width, height, start_x, start_y.
         """
-        frame_height, frame_width = frame.shape[:2]
-        self.frame_width = frame_width
-        self.frame_height = frame_height
-        
-        # Set court dimensions for coordinate calculations
-        self.court_width = frame_width  # Full court width in pixels
-        self.court_height = frame_height  # Full court height in pixels
-        
-        # Mini court dimensions
-        self.mini_court_width = mini_court_width if mini_court_width else int(frame_width * 0.2)
-        self.mini_court_height = mini_court_height if mini_court_height else int(self.mini_court_width * 1.5)
-        
-        self.drawing_rectangle_width = 250
-        self.drawing_rectangle_height = 500
-        self.buffer = 50 
-        self.padding_court = 20
+        self.frame_height, self.frame_width = frame.shape[:2]
+        self.padding_court = self._PADDING
 
+        if layout_params is not None:
+            self.mini_court_width         = layout_params["width"]
+            self.mini_court_height        = layout_params["height"]
+            self.drawing_rectangle_width  = layout_params["width"]
+            self.drawing_rectangle_height = layout_params["height"]
+            self.buffer                   = 10
+            self._layout_start_x          = layout_params["start_x"]
+            self._layout_start_y          = layout_params["start_y"]
+            self._use_layout_position     = True
+        else:
+            w = mini_court_width  or max(int(self.frame_width * self._WIDTH_FRAC), self._MIN_COURT_W)
+            h = mini_court_height or max(int(w * 2.2), self._MIN_COURT_H)
+            self.mini_court_width         = w
+            self.mini_court_height        = h
+            self.drawing_rectangle_width  = w + 30
+            self.drawing_rectangle_height = h + 30
+            self.buffer                   = max(25, int(min(self.frame_width, self.frame_height) * 0.035))
+            self._use_layout_position     = False
 
-        self.set_canvas_background_box_position(frame)
-        self.set_mini_court_position()
-        self.set_court_drawing_key_points()
-        self.set_court_lines()
+        self._set_canvas_position(frame)
+        self._set_court_position()
+        self._set_drawing_keypoints()
+        self._set_court_lines()
 
-    def convert_meters_to_pixels(self, meters): 
-         return convert_meters_to_pixel_distance(meters,
-                                                constants.DOUBLE_LINE_WIDTH,
-                                                self.court_drawing_width)  
+    # ── Private init helpers ──────────────────────────────────────────────────
 
-    def set_court_drawing_key_points(self):
+    def _set_canvas_position(self, frame: np.ndarray) -> None:
+        """Compute the background rectangle's top-left / bottom-right pixel bounds."""
+        if self._use_layout_position:
+            self.start_x = self._layout_start_x
+            self.start_y = self._layout_start_y
+        else:
+            # Default: top-right corner of the video frame
+            self.start_x = frame.shape[1] - self.buffer - self.drawing_rectangle_width
+            self.start_y = self.buffer
+        self.end_x = self.start_x + self.drawing_rectangle_width
+        self.end_y = self.start_y + self.drawing_rectangle_height
 
-        drawing_key_points = [0] * 28 # create a list of 28 zeros
+    def _set_court_position(self) -> None:
+        """Derive court-line bounds inside the background rectangle."""
+        self.court_start_x      = self.start_x + self.padding_court
+        self.court_start_y      = self.start_y + self.padding_court
+        self.court_end_x        = self.end_x   - self.padding_court
+        self.court_end_y        = self.end_y   - self.padding_court
+        self.court_drawing_width  = self.court_end_x - self.court_start_x
+        self.court_drawing_height = self.court_end_y - self.court_start_y
+        # Extended play zone: dots may appear anywhere in the background area
+        self.playing_area_start_y = self.start_y
+        self.playing_area_end_y   = self.end_y
 
-        # point 0 
-        drawing_key_points[0] , drawing_key_points[1] = int(self.court_start_x), int(self.court_start_y)
+    def _meters_to_px(self, meters: float) -> float:
+        """Convert real-world metres to mini-court pixels (uniform X/Y scale)."""
+        return convert_meters_to_pixel_distance(
+            meters, constants.DOUBLE_LINE_WIDTH, self.court_drawing_width
+        )
 
-        # point 1
-        drawing_key_points[2] , drawing_key_points[3] = int(self.court_end_x), int(self.court_start_y)
+    def _set_drawing_keypoints(self) -> None:
+        """
+        Compute the 14 reference keypoints (28 floats) that define the court diagram.
 
-        # point 2
-        drawing_key_points[4] = int(self.court_start_x)
-        drawing_key_points[5] = self.court_start_y + self.convert_meters_to_pixels(constants.HALF_COURT_LINE_HEIGHT*2)
+        Flat-array layout: [x0,y0, x1,y1, ..., x13,y13].
+        Index map (top = far baseline, bottom = near baseline):
 
-        # point 3
-        drawing_key_points[6] = drawing_key_points[0] + self.court_drawing_width
-        drawing_key_points[7] = drawing_key_points[5]
+          0  outer TL   1  outer TR
+          2  outer BL   3  outer BR
+          4  singles TL  5  singles BL
+          6  singles TR  7  singles BR
+          8  svc far-L   9  svc far-R
+         10  svc near-L 11  svc near-R
+         12  centre-T (far)  13  centre-T (near)
+        """
+        cx, cy = float(self.court_start_x), float(self.court_start_y)
+        w      = float(self.court_drawing_width)
+        full_h = self._meters_to_px(constants.HALF_COURT_LINE_HEIGHT * 2)
+        alley  = self._meters_to_px(constants.DOUBLE_ALLY_DIFFERENCE)
+        svc_h  = self._meters_to_px(constants.NO_MANS_LAND_HEIGHT)
+        svc_w  = self._meters_to_px(constants.SINGLE_LINE_WIDTH)
 
-        # #point 4
-        drawing_key_points[8] = drawing_key_points[0] +  self.convert_meters_to_pixels(constants.DOUBLE_ALLY_DIFFERENCE)
-        drawing_key_points[9] = drawing_key_points[1] 
+        p = [0.0] * 28
 
-        # #point 5
-        drawing_key_points[10] = drawing_key_points[4] + self.convert_meters_to_pixels(constants.DOUBLE_ALLY_DIFFERENCE)
-        drawing_key_points[11] = drawing_key_points[5]
+        # Outer doubles corners (0-3)
+        p[0],  p[1]  = cx,      cy
+        p[2],  p[3]  = cx + w,  cy
+        p[4],  p[5]  = cx,      cy + full_h
+        p[6],  p[7]  = cx + w,  cy + full_h
 
-        # #point 6
-        drawing_key_points[12] = drawing_key_points[2] - self.convert_meters_to_pixels(constants.DOUBLE_ALLY_DIFFERENCE)
-        drawing_key_points[13] = drawing_key_points[3] 
+        # Singles sideline endpoints (4-7)
+        p[8],  p[9]  = cx + alley,     cy
+        p[10], p[11] = cx + alley,     cy + full_h
+        p[12], p[13] = cx + w - alley, cy
+        p[14], p[15] = cx + w - alley, cy + full_h
 
-        # #point 7
-        drawing_key_points[14] = drawing_key_points[6] - self.convert_meters_to_pixels(constants.DOUBLE_ALLY_DIFFERENCE)
-        drawing_key_points[15] = drawing_key_points[7] 
+        # Service-box inner corners (8-11)
+        p[16], p[17] = cx + alley,         cy + svc_h
+        p[18], p[19] = cx + alley + svc_w, cy + svc_h
+        p[20], p[21] = cx + alley,         cy + full_h - svc_h
+        p[22], p[23] = cx + alley + svc_w, cy + full_h - svc_h
 
-        # #point 8
-        drawing_key_points[16] = drawing_key_points[8] 
-        drawing_key_points[17] = drawing_key_points[9] + self.convert_meters_to_pixels(constants.NO_MANS_LAND_HEIGHT)
+        # Centre-T marks (12-13)
+        p[24], p[25] = cx + alley + svc_w / 2, cy + svc_h
+        p[26], p[27] = cx + alley + svc_w / 2, cy + full_h - svc_h
 
-        # # #point 9
-        drawing_key_points[18] = drawing_key_points[16] + self.convert_meters_to_pixels(constants.SINGLE_LINE_WIDTH)
-        drawing_key_points[19] = drawing_key_points[17] 
+        self.drawing_key_points = [int(v) for v in p]
 
-        # #point 10
-        drawing_key_points[20] = drawing_key_points[10] 
-        drawing_key_points[21] = drawing_key_points[11] - self.convert_meters_to_pixels(constants.NO_MANS_LAND_HEIGHT)
-
-        # # #point 11
-        drawing_key_points[22] = drawing_key_points[20] +  self.convert_meters_to_pixels(constants.SINGLE_LINE_WIDTH)
-        drawing_key_points[23] = drawing_key_points[21] 
-
-        # # #point 12
-        drawing_key_points[24] = int((drawing_key_points[16] + drawing_key_points[18])/2)
-        drawing_key_points[25] = drawing_key_points[17] 
-
-        # # #point 13
-        drawing_key_points[26] = int((drawing_key_points[20] + drawing_key_points[22])/2)
-        drawing_key_points[27] = drawing_key_points[21] 
-
-        self.drawing_key_points = drawing_key_points
-
-    def set_court_lines(self):
+    def _set_court_lines(self) -> None:
+        """Pairs of keypoint indices that define each line segment to draw."""
         self.lines = [
-            (0, 2),
-            (4, 5),
-            (6,7),
-            (1,3),
-            
-            (0,1),
-            (8,9),
-            (10,11),
-            (10,11),
-            (2,3)
+            (0, 2),    # left outer sideline
+            (1, 3),    # right outer sideline
+            (0, 1),    # far baseline
+            (2, 3),    # near baseline
+            (4, 5),    # left singles sideline
+            (6, 7),    # right singles sideline
+            (8, 9),    # far service line
+            (10, 11),  # near service line
+            (12, 13),  # centre service line
         ]
 
+    # ── Public geometry accessors ─────────────────────────────────────────────
 
+    def get_start_point_of_mini_court(self) -> tuple[int, int]:
+        return (self.court_start_x, self.court_start_y)
 
-
-    def set_mini_court_position(self):
-        self.court_start_x = self.start_x + self.padding_court
-        self.court_start_y = self.start_y + self.padding_court
-        self.court_end_x = self.end_x - self.padding_court
-        self.court_end_y = self.end_y - self.padding_court
-        self.court_drawing_width = self.court_end_x - self.court_start_x
-        self.court_height = self.court_end_y - self.court_start_y  # Add the missing court_height attribute
-      
-
-    def set_canvas_background_box_position(self, frame):
-        self.end_x = frame.shape[1] - self.buffer
-        self.end_y = self.buffer + self.drawing_rectangle_height 
-        self.start_x = self.end_x - self.drawing_rectangle_width
-        self.start_y = self.end_y - self.drawing_rectangle_height
-
-
-    def draw_court(self,frame):
-        for i in range(0, len(self.drawing_key_points),2):
-            x = int(self.drawing_key_points[i])
-            y = int(self.drawing_key_points[i+1])
-            cv2.circle(frame, (x,y),5, (0,0,255),-1)
-
-        # Drawing the Lines
-        for line in self.lines:
-            start_point = (int(self.drawing_key_points[line[0]*2]), int(self.drawing_key_points[line[0]*2+1]))
-            end_point = (int(self.drawing_key_points[line[1]*2]), int(self.drawing_key_points[line[1]*2+1]))
-            cv2.line(frame, start_point, end_point, (0, 0, 0), 2)
-
-        # Drawing the net
-        net_start_point = (self.drawing_key_points[0], int((self.drawing_key_points[1] + self.drawing_key_points[5])/2))
-        net_end_point = (self.drawing_key_points[2], int((self.drawing_key_points[1] + self.drawing_key_points[5])/2))
-        cv2.line(frame, net_start_point, net_end_point, (255, 0, 0), 2)
-
-        return frame
-
-
-       
-        
-    def draw_background_rectangle(self, frame):
-        # Create a smaller mask just for the rectangle area instead of the whole frame
-        # This significantly reduces memory usage
-        roi = frame[self.start_y:self.end_y, self.start_x:self.end_x].copy()
-        
-        # Create a white background of the same size as the ROI
-        white_bg = np.ones_like(roi) * 255
-        
-        # Blend the ROI with the white background (alpha blending)
-        alpha = 0.5
-        blended_roi = cv2.addWeighted(roi, alpha, white_bg, 1 - alpha, 0)
-        
-        # Place the blended ROI back into the original frame
-        frame[self.start_y:self.end_y, self.start_x:self.end_x] = blended_roi
-        
-        # Return the modified frame (no need to create a new copy)
-        return frame
-    
-    def draw_mini_court(self, frames):
-        """
-        Draw a visually appealing mini court without labels
-        for a cleaner, more professional appearance
-        """
-        output_frames = []
-        for frame in frames:
-            # Draw a gradient background for the mini court area
-            frame = self.draw_background_rectangle(frame)
-            
-            # Draw court with enhanced styling
-            frame = self.draw_court_with_styling(frame)
-            
-            output_frames.append(frame)
-
-        return output_frames
-        
-    def draw_court_with_styling(self, frame):
-        """
-        Draw the mini court with professional styling and clear visual representation.
-        
-        This enhanced version creates a clean, professional-looking mini court with:
-        - Clear court boundaries and markings
-        - Professional color scheme
-        - High-contrast lines and keypoints
-        - No distracting elements
-        """
-        # Step 1: Create a clean court surface with a professional blue tennis court color
-        court_surface = np.zeros_like(frame)
-        court_points = []
-        
-        # Get the court outline points for the main polygon
-        for i in range(0, 8, 2):  # Using the first 4 points that form the court outline
-            x = int(self.drawing_key_points[i])
-            y = int(self.drawing_key_points[i+1])
-            court_points.append((x, y))
-            
-        # Convert to numpy array for drawing polygon
-        court_points = np.array(court_points, np.int32)
-        court_points = court_points.reshape((-1, 1, 2))
-        
-        # Fill the court with a professional tennis court blue color
-        # This resembles actual hard court tennis surfaces for better realism
-        cv2.fillPoly(court_surface, [court_points], (176, 127, 89))  # Pro tennis court blue (BGR)
-        
-        # Blend with the frame for a clean look
-        mask = np.any(court_surface != [0, 0, 0], axis=-1)
-        frame[mask] = cv2.addWeighted(frame, 0.1, court_surface, 0.9, 0)[mask]
-        
-        # Draw the court lines with professional styling
-        # Using clean white lines like a real tennis court
-        for line in self.lines:
-            start_point = (int(self.drawing_key_points[line[0]*2]), int(self.drawing_key_points[line[0]*2+1]))
-            end_point = (int(self.drawing_key_points[line[1]*2]), int(self.drawing_key_points[line[1]*2+1]))
-            
-            # Draw crisp, clean BLACK lines for better visibility as requested
-            cv2.line(frame, start_point, end_point, (0, 0, 0), 2)  # Pure BLACK lines
-
-        # Drawing the net with a distinctive BLUE color (different from court lines)
-        net_start_point = (int(self.drawing_key_points[0]), int((self.drawing_key_points[1] + self.drawing_key_points[5])/2))
-        net_end_point = (int(self.drawing_key_points[2]), int((self.drawing_key_points[1] + self.drawing_key_points[5])/2))
-        
-        # Draw a thicker line for the net with distinctive blue color (different from court lines)
-        cv2.line(frame, net_start_point, net_end_point, (128, 0, 0), 3)  # Blue net
-        
-        # Add court keypoints for better reference - these help understand the court geometry
-        # Using bright RED keypoints that are clearly visible as requested by the user
-        for i in range(0, len(self.drawing_key_points), 2):
-            if i < len(self.drawing_key_points):
-                x = int(self.drawing_key_points[i])
-                y = int(self.drawing_key_points[i+1])
-                
-                # Use a bright RED color for keypoints as requested for better visibility
-                # Adding a 2-layer approach for more prominence
-                cv2.circle(frame, (x, y), 5, (0, 0, 0), -1)  # Black outline
-                cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)  # Bright RED keypoints
-                
-                # REMOVING the confusing yellow/orange lines that were connecting keypoints
-                # This makes the visualization cleaner and more professional as requested
-        
-        # Removing the legend completely - no text or legend points
-        # This keeps the mini court clean and professional without any text
-                  
-        return frame
-           
-    def get_start_point_of_mini_court(self):
-        return (self.court_start_x,self.court_start_y)
-    
-    def get_width_of_mini_court(self):
+    def get_width_of_mini_court(self) -> int:
         return self.court_drawing_width
-    
-    def get_court_drawing_keypoints(self):
+
+    def get_court_drawing_keypoints(self) -> list[int]:
         return self.drawing_key_points
-    
-    def get_mini_court_coordinates(self, object_position, closest_keypoint, closest_keypoint_index, player_height_in_pixels, player_height_in_meters):
-        distance_from_keypont_x_pixels, distance_from_keypont_y_pixels = measure_xy_distance(object_position, closest_keypoint)
 
-        # Covert pixel distance to meters
-        distance_from_keypont_x_meters = convert_pixel_distance_to_meters(distance_from_keypont_x_pixels, player_height_in_meters, player_height_in_pixels)
-        distance_from_keypont_y_pixels = convert_pixel_distance_to_meters(distance_from_keypont_y_pixels, player_height_in_meters, player_height_in_pixels)
+    # ── Homography ────────────────────────────────────────────────────────────
 
-        # Convert to mini court coordinates
-        mini_court_x_distance_pixels = self.convert_meters_to_pixels(distance_from_keypont_x_meters)
-        mini_court_y_distance_pixels = self.convert_meters_to_pixels(distance_from_keypont_y_pixels)
-
-        closest_mini_court_keypoint = (self.drawing_key_points[closest_keypoint_index*2], self.drawing_key_points[closest_keypoint_index*2+1]) 
-
-        mini_court_player_position = (closest_mini_court_keypoint[0] + mini_court_x_distance_pixels, closest_mini_court_keypoint[1] + mini_court_y_distance_pixels)
-
-        return mini_court_player_position
-
-    
-    def convert_bounding_boxes_to_mini_court_coordinates(self, player_boxes, ball_boxes, court_keypoints):
+    def compute_homography(self, video_keypoints: np.ndarray) -> np.ndarray | None:
         """
-        Convert bounding boxes to mini court coordinates with enhanced accuracy
-        - Improved real-time synchronization between actual and mini court
-        - Better ball position tracking relative to player positions
-        - More accurate coordinate transformation
+        Fit a 3×3 perspective homography: video-frame space → mini-court space.
+
+        Source points: the 14 court keypoints detected by the ResNet-50 detector.
+        Destination  : the 14 pre-computed drawing_key_points.
+        RANSAC (10 px reprojection threshold) discards noisy detections.
+
+        Returns the 3×3 matrix H, or None when fewer than 4 inliers survive.
+        The caller falls back to nearest-keypoint approximation on None.
         """
-        output_player_boxes_dict = {}
-        output_ball_boxes_dict = {}
-        
-        # Process each frame
-        for frame_num in range(len(player_boxes)):
-            frame_player_boxes = player_boxes[frame_num]
-            frame_ball_boxes = ball_boxes[frame_num] if frame_num < len(ball_boxes) else {}
-            
-            # Initialize frame dictionaries
-            output_player_boxes_dict[frame_num] = {}
-            output_ball_boxes_dict[frame_num] = {}
-            
-            # Process player bounding boxes
-            for player_id, bbox in frame_player_boxes.items():
-                try:
-                    # Get foot position (bottom center of bounding box)
-                    foot_x, foot_y = self.get_foot_position(bbox)
-                    
-                    # Find the closest court keypoint to determine player's court position
-                    closest_keypoint_index = self.get_closest_keypoint_index(
-                        (foot_x, foot_y), 
-                        court_keypoints, 
-                        allowed_indices=range(len(court_keypoints) // 2)
-                    )
-                    
-                    # Get the corresponding mini court coordinate
-                    mini_court_x = self.drawing_key_points[closest_keypoint_index * 2]
-                    mini_court_y = self.drawing_key_points[closest_keypoint_index * 2 + 1]
-                    
-                    # Calculate offset based on player's position relative to the keypoint
-                    kp_x = court_keypoints[closest_keypoint_index * 2]
-                    kp_y = court_keypoints[closest_keypoint_index * 2 + 1]
-                    
-                    # Calculate normalized offset (0-1 range)
-                    offset_x_norm = (foot_x - kp_x) / max(self.court_width, 1)
-                    offset_y_norm = (foot_y - kp_y) / max(self.court_height, 1)
-                    
-                    # Scale offset to mini court dimensions
-                    offset_x_mini = offset_x_norm * self.mini_court_width
-                    offset_y_mini = offset_y_norm * self.mini_court_height
-                    
-                    # Apply offset to mini court position
-                    mini_court_x += offset_x_mini
-                    mini_court_y += offset_y_mini
-                    
-                    # Ensure position is within mini court boundaries
-                    mini_court_x = max(self.start_x, min(self.end_x, mini_court_x))
-                    mini_court_y = max(self.start_y, min(self.end_y, mini_court_y))
-                    
-                    # Store the mini court position
-                    output_player_boxes_dict[frame_num][player_id] = (mini_court_x, mini_court_y)
-                    
-                except (ValueError, TypeError, IndexError):
-                    # Use default position if calculation fails
-                    default_x = self.start_x + self.mini_court_width // 2
-                    default_y = self.start_y + self.mini_court_height // 2
-                    output_player_boxes_dict[frame_num][player_id] = (default_x, default_y)
-            
-            # Process ball bounding boxes with enhanced accuracy
-            for ball_id, bbox in frame_ball_boxes.items():
-                try:
-                    # Get ball center
-                    ball_x = (bbox[0] + bbox[2]) / 2
-                    ball_y = (bbox[1] + bbox[3]) / 2
-                    
-                    # Find the closest court keypoint
-                    closest_keypoint_index = self.get_closest_keypoint_index(
-                        (ball_x, ball_y), 
-                        court_keypoints, 
-                        allowed_indices=range(len(court_keypoints) // 2)
-                    )
-                    
-                    # Get the corresponding mini court coordinate
-                    mini_court_x = self.drawing_key_points[closest_keypoint_index * 2]
-                    mini_court_y = self.drawing_key_points[closest_keypoint_index * 2 + 1]
-                    
-                    # Calculate offset based on ball's position relative to the keypoint
-                    kp_x = court_keypoints[closest_keypoint_index * 2]
-                    kp_y = court_keypoints[closest_keypoint_index * 2 + 1]
-                    
-                    # Calculate normalized offset (0-1 range)
-                    offset_x_norm = (ball_x - kp_x) / max(self.court_width, 1)
-                    offset_y_norm = (ball_y - kp_y) / max(self.court_height, 1)
-                    
-                    # Scale offset to mini court dimensions
-                    offset_x_mini = offset_x_norm * self.mini_court_width
-                    offset_y_mini = offset_y_norm * self.mini_court_height
-                    
-                    # Apply offset to mini court position
-                    mini_court_x += offset_x_mini
-                    mini_court_y += offset_y_mini
-                    
-                    # Find the nearest player to determine ball possession
-                    nearest_player = None
-                    min_distance = float('inf')
-                    
-                    for player_id, player_bbox in frame_player_boxes.items():
-                        player_x = (player_bbox[0] + player_bbox[2]) / 2
-                        player_y = (player_bbox[1] + player_bbox[3]) / 2
-                        
-                        # Calculate Euclidean distance
-                        distance = np.sqrt((ball_x - player_x)**2 + (ball_y - player_y)**2)
-                        
-                        if distance < min_distance:
-                            min_distance = distance
-                            nearest_player = player_id
-                    
-                    # If ball is very close to a player (improved threshold), position it near that player
-                    # This significantly improves real-time accuracy of ball possession
-                    if nearest_player is not None and min_distance < 150 and nearest_player in output_player_boxes_dict[frame_num]:
-                        player_mini_x, player_mini_y = output_player_boxes_dict[frame_num][nearest_player]
-                        
-                        # Very small offset for precise positioning (just 3-5 pixels)
-                        offset_x = 5 * (0.5 - random.random())  # Random offset between -2.5 and 2.5
-                        offset_y = 5 * (0.5 - random.random())  # Random offset between -2.5 and 2.5
-                        
-                        mini_court_ball_position = (int(player_mini_x + offset_x), int(player_mini_y + offset_y))
-                    else:
-                        # Ensure position is within mini court boundaries
-                        mini_court_x = max(self.start_x, min(self.end_x, mini_court_x))
-                        mini_court_y = max(self.start_y, min(self.end_y, mini_court_y))
-                        
-                        mini_court_ball_position = (int(mini_court_x), int(mini_court_y))
-                    
-                    # Store the mini court position
-                    output_ball_boxes_dict[frame_num][ball_id] = mini_court_ball_position
-                    
-                except (ValueError, TypeError, IndexError):
-                    # If no valid ball position, check if we have players and use their position
-                    if output_player_boxes_dict[frame_num] and 1 in output_player_boxes_dict[frame_num]:
-                        # Default to player 1's position with small offset
-                        player_x, player_y = output_player_boxes_dict[frame_num][1]
-                        offset_x = 5 * (0.5 - random.random())
-                        offset_y = 5 * (0.5 - random.random())
-                        output_ball_boxes_dict[frame_num][ball_id] = (int(player_x + offset_x), int(player_y + offset_y))
-                    else:
-                        # Use center of mini court as fallback
-                        default_x = self.start_x + self.mini_court_width // 2
-                        default_y = self.start_y + self.mini_court_height // 2
-                        output_ball_boxes_dict[frame_num][ball_id] = (default_x, default_y)
-        
-        return output_player_boxes_dict, output_ball_boxes_dict
+        try:
+            src = np.array(video_keypoints,        dtype=np.float32).reshape(-1, 1, 2)
+            dst = np.array(self.drawing_key_points, dtype=np.float32).reshape(-1, 1, 2)
+            H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 10.0)
+            inliers = int(mask.sum()) if mask is not None else 0
+            if H is None or inliers < 4:
+                logger.debug("Homography rejected: %d/14 inliers", inliers)
+                return None
+            logger.debug("Homography OK: %d/14 inliers", inliers)
+            return H
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Homography failed: %s", exc)
+            return None
 
-    def constrain_to_court_boundaries(self, position):
-        """Ensure position is within court boundaries"""
-        x, y = position
-        
-        # Check for NaN values
-        if np.isnan(x) or np.isnan(y):
-            # Default to center court if values are NaN
-            return ((self.court_start_x + self.court_end_x) // 2, 
-                    (self.court_start_y + self.court_end_y) // 2)
-        
-        # Constrain to court boundaries with a small buffer
-        buffer = 10  # pixels
-        x = max(self.court_start_x - buffer, min(x, self.court_end_x + buffer))
-        y = max(self.court_start_y - buffer, min(y, self.court_end_y + buffer))
-        
-        return (x, y)
+    def apply_homography(
+        self, H: np.ndarray, point: tuple[float, float]
+    ) -> tuple[float, float]:
+        """Map one (x, y) from video-frame space to mini-court space via H."""
+        pt  = np.array([[[float(point[0]), float(point[1])]]], dtype=np.float32)
+        out = cv2.perspectiveTransform(pt, H)
+        return float(out[0, 0, 0]), float(out[0, 0, 1])
 
-    def get_foot_position(self, bbox):
-        """Get foot position of a player from their bounding box"""
-        x1, y1, x2, y2 = bbox
-        # Foot position is the bottom center of the bounding box
-        foot_x = (x1 + x2) / 2
-        foot_y = y2
-        return foot_x, foot_y
-    
-    def get_closest_keypoint_index(self, position, keypoints, allowed_indices=None):
-        """Find the closest keypoint to a given position"""
-        x, y = position
-        min_dist = float('inf')
-        closest_index = 0
-        
-        allowed_indices = allowed_indices if allowed_indices is not None else range(len(keypoints) // 2)
-        
-        for i in allowed_indices:
-            kp_x = keypoints[i*2]
-            kp_y = keypoints[i*2+1]
-            
-            dist = np.sqrt((x - kp_x)**2 + (y - kp_y)**2)
-            
-            if dist < min_dist:
-                min_dist = dist
-                closest_index = i
-        
-        return closest_index
-
-    def draw_points_on_mini_court(self, frames, positions, color=(0,255,0), draw_trail=False, label=None):
+    def _fallback_mapping(
+        self,
+        vx: float, vy: float,
+        video_kp: np.ndarray,
+        y_scale: float = 1.0,
+    ) -> tuple[float, float]:
         """
-        Draw points on mini court with enhanced visualization features:
-        - Both players have IDENTICAL green circles with IDENTICAL thickness
-        - Ball has a distinct bright PURPLE color to differentiate from players
-        - No distracting text labels for cleaner visualization
-        - Ball follows players more accurately with real-time synchronization
-        
+        Approximate mapping used only when homography is unavailable.
+
+        Finds the geometrically closest video keypoint, then applies a linear
+        offset (normalised by frame dimensions) to the corresponding mini-court
+        keypoint.  Less accurate than homography - cannot correct perspective.
+
+        y_scale: compensates for aspect-ratio differences between the video
+                 perspective and the orthographic drawing (1.4 for player feet,
+                 1.0 for the ball centre).
+        """
+        n = len(video_kp) // 2
+        dists = np.hypot(
+            vx - video_kp[0::2][:n],
+            vy - video_kp[1::2][:n],
+        )
+        k     = int(np.argmin(dists))
+        dx    = (vx - video_kp[k * 2])     / self.frame_width  * self.mini_court_width
+        dy    = (vy - video_kp[k * 2 + 1]) / self.frame_height * self.mini_court_height * y_scale
+        return self.drawing_key_points[k * 2] + dx, self.drawing_key_points[k * 2 + 1] + dy
+
+    # ── Coordinate conversion ─────────────────────────────────────────────────
+
+    def convert_bounding_boxes_to_mini_court_coordinates(
+        self,
+        player_boxes:   list[dict],
+        ball_boxes:     list[dict],
+        court_keypoints,
+        use_homography: bool = True,
+    ) -> tuple[dict, dict]:
+        """
+        Map every player and ball bounding box to mini-court pixel coordinates.
+
         Args:
-            frames: List of video frames to draw on
-            positions: Player or ball positions to visualize
-            color: Base color for the points (default: green)
-            draw_trail: Whether to draw movement trails (default: False)
-            label: Text label to display (default: None, no labels will be shown for clean visualization)
-            
+            player_boxes:    List (one entry per frame) of {player_id: [x1,y1,x2,y2]}.
+            ball_boxes:      List (one entry per frame) of {ball_id:   [x1,y1,x2,y2]}.
+            court_keypoints: Flat keypoint array (all frames share it) OR a list of
+                             per-frame arrays for camera-robust mode.
+            use_homography:  Attempt RANSAC homography first when True.
+
+        Returns:
+            (player_positions, ball_positions) - dicts with the same outer
+            structure as the inputs, but values are (x, y) mini-court coords.
         """
-        # History of positions for drawing trails
-        position_history = []
-        
-        # Define CONSISTENT player circle parameters
-        PLAYER_OUTLINE_THICKNESS = 10  # Identical outline thickness for both players
-        PLAYER_CIRCLE_THICKNESS = 8    # Identical circle thickness for both players
-        PLAYER_COLOR = (0, 180, 0)     # Identical GREEN color for both players (BGR format)
-        
-        # Define DISTINCT ball color - bright PURPLE instead of blue or orange
-        BALL_COLOR = (128, 0, 128)  # Bright PURPLE color for ball (BGR format)
-        
-        # Determine if we're drawing players or ball based on the input color
-        # This is a more reliable way to distinguish between the two calls from main.py
-        # In main.py, players are drawn with color=(0,255,0) and ball with color=(0,255,255)
-        is_drawing_ball = False
-        if color == (0, 255, 255):  # This is the color used for ball in main.py
-            is_drawing_ball = True
-        
-        for frame_num, frame in enumerate(frames):
-            current_positions = []
-            
-            # Extract current frame positions
-            for obj_id, position in positions[frame_num].items():
+        # Detect per-frame vs. single-frame keypoint input
+        per_frame = (
+            isinstance(court_keypoints, list)
+            and len(court_keypoints) > 0
+            and hasattr(court_keypoints[0], "__len__")
+            and not isinstance(court_keypoints[0], (int, float))
+        )
+
+        # Cache homography by keypoint tuple to avoid recomputing identical frames.
+        _h_cache: dict[tuple, np.ndarray | None] = {}
+
+        out_players: dict[int, dict] = {}
+        out_ball:    dict[int, dict] = {}
+
+        for frame_num in range(len(player_boxes)):
+            kp = court_keypoints[min(frame_num, len(court_keypoints) - 1)] if per_frame else court_keypoints
+
+            out_players[frame_num] = {}
+            out_ball[frame_num]    = {}
+
+            H: np.ndarray | None = None
+            if use_homography:
+                key = tuple(kp)
+                if key not in _h_cache:
+                    _h_cache[key] = self.compute_homography(kp)
+                H = _h_cache[key]
+
+            # ── Players: foot position = bottom-centre of bounding box ────────
+            for pid, bbox in player_boxes[frame_num].items():
                 try:
-                    x, y = position
-                    # Handle NaN or invalid positions
-                    if np.isnan(x) or np.isnan(y):
-                        continue
-                        
-                    x, y = int(x), int(y)
-                    current_positions.append((obj_id, x, y))
-                    
-                    # Enhanced circle drawing with dark outline for better visibility
-                    if is_drawing_ball:
-                        # Ball visualization - make MUCH more visible with PURPLE color
-                        # First draw larger black outline for definition against any background
-                        cv2.circle(frame, (x, y), 9, (0, 0, 0), -1)  # Black outline
-                        # Then draw main ball circle with a distinct PURPLE color that stands out
-                        cv2.circle(frame, (x, y), 7, BALL_COLOR, -1)  # Bright PURPLE ball - distinct from players
+                    fx, fy = (bbox[0] + bbox[2]) / 2.0, float(bbox[3])
+                    if H is not None:
+                        mx, my = self.apply_homography(H, (fx, fy))
                     else:
-                        # Player visualization with CONSISTENT green coloring and thickness for both players
-                        # Both players will be IDENTICAL green circles with IDENTICAL thickness
-                        cv2.circle(frame, (x, y), PLAYER_OUTLINE_THICKNESS, (0, 0, 0), -1)  # Black outline - IDENTICAL thickness
-                        cv2.circle(frame, (x, y), PLAYER_CIRCLE_THICKNESS, PLAYER_COLOR, -1)  # Green fill - IDENTICAL color and thickness
-                    
+                        mx, my = self._fallback_mapping(fx, fy, kp, y_scale=1.4)
+                    out_players[frame_num][pid] = (
+                        float(np.clip(mx, self.start_x, self.end_x)),
+                        float(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
+                    )
+                except (ValueError, TypeError, IndexError):
+                    out_players[frame_num][pid] = (
+                        self.start_x + self.mini_court_width  // 2,
+                        self.start_y + self.mini_court_height // 2,
+                    )
+
+            # ── Ball: centre of bounding box ──────────────────────────────────
+            for bid, bbox in (ball_boxes[frame_num] if frame_num < len(ball_boxes) else {}).items():
+                try:
+                    bx = (bbox[0] + bbox[2]) / 2.0
+                    by = (bbox[1] + bbox[3]) / 2.0
+                    if H is not None:
+                        mx, my = self.apply_homography(H, (bx, by))
+                    else:
+                        mx, my = self._fallback_mapping(bx, by, kp)
+                    out_ball[frame_num][bid] = (
+                        int(np.clip(mx, self.start_x, self.end_x)),
+                        int(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
+                    )
+                except (ValueError, TypeError, IndexError):
+                    out_ball[frame_num][bid] = (
+                        self.start_x + self.mini_court_width  // 2,
+                        self.start_y + self.mini_court_height // 2,
+                    )
+
+        return out_players, out_ball
+
+    # ── State-aware ball projection ───────────────────────────────────────────
+
+    def convert_ball_to_mini_court_coordinates(
+        self,
+        ball_boxes: list[dict],
+        court_keypoints,
+        floor_level_states: list[str],
+        use_homography: bool = True,
+    ) -> dict[int, dict]:
+        """
+        Map the ball to mini-court coordinates, respecting floor-level validity.
+
+        The floor homography is only geometrically correct when the ball is AT floor
+        level (a contact or a bounce - see utils.ball_state.classify_floor_level).
+        Projecting an airborne pixel through it gives a wrong position, because the
+        ball has real height that the floor-plane transform cannot see.
+
+        So: project directly at floor-level frames, and linearly interpolate the
+        mini-court position for in-flight frames between the surrounding floor-level
+        anchors. This draws the ball's true ground track instead of a geometrically
+        invalid airborne scatter (see docs/journal/0003 and João's feedback in
+        docs/reference/APPROACH.md - "only project ball for floor bounces or player
+        hits"). Frames before the first anchor or after the last hold at that anchor
+        (no extrapolation).
+
+        Args:
+            ball_boxes:         per-frame {1: [x1,y1,x2,y2]}.
+            court_keypoints:    flat keypoint array, or a per-frame list (camera-robust).
+            floor_level_states: per-frame labels from classify_floor_level()
+                                 (FLOOR_LEVEL or IN_FLIGHT), same length as ball_boxes.
+            use_homography:     attempt RANSAC homography at anchor frames when True.
+
+        Returns:
+            dict[frame_num, {1: (x, y)}] mini-court ball positions.
+        """
+        n = len(ball_boxes)
+        per_frame = (
+            isinstance(court_keypoints, list)
+            and len(court_keypoints) > 0
+            and hasattr(court_keypoints[0], "__len__")
+            and not isinstance(court_keypoints[0], (int, float))
+        )
+        _h_cache: dict[tuple, np.ndarray | None] = {}
+
+        # Pass 1 - project the ball at every floor-level anchor frame only.
+        anchors: dict[int, tuple[float, float]] = {}
+        for frame_num in range(n):
+            if floor_level_states[frame_num] != "floor_level":
+                continue
+            bbox = ball_boxes[frame_num].get(1) if frame_num < len(ball_boxes) else None
+            if bbox is None:
+                continue
+
+            kp = court_keypoints[min(frame_num, len(court_keypoints) - 1)] if per_frame else court_keypoints
+            bx, by = (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
+
+            H: np.ndarray | None = None
+            if use_homography:
+                key = tuple(kp)
+                if key not in _h_cache:
+                    _h_cache[key] = self.compute_homography(kp)
+                H = _h_cache[key]
+
+            try:
+                mx, my = self.apply_homography(H, (bx, by)) if H is not None \
+                    else self._fallback_mapping(bx, by, kp)
+                anchors[frame_num] = (
+                    float(np.clip(mx, self.start_x, self.end_x)),
+                    float(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
+                )
+            except (ValueError, TypeError, IndexError):
+                continue
+
+        # Pass 2 - interpolate every frame between the surrounding anchors.
+        anchor_frames = sorted(anchors)
+        out: dict[int, dict] = {}
+
+        if not anchor_frames:
+            logger.warning("convert_ball_to_mini_court_coordinates: no floor-level anchors found")
+            return {f: {} for f in range(n)}
+
+        for frame_num in range(n):
+            if frame_num in anchors:
+                out[frame_num] = {1: anchors[frame_num]}
+                continue
+
+            # Find the nearest anchor before and after this frame.
+            prev_f = next((a for a in reversed(anchor_frames) if a < frame_num), None)
+            next_f = next((a for a in anchor_frames if a > frame_num), None)
+
+            if prev_f is None and next_f is None:
+                out[frame_num] = {}
+            elif prev_f is None:
+                out[frame_num] = {1: anchors[next_f]}          # before first anchor - hold
+            elif next_f is None:
+                out[frame_num] = {1: anchors[prev_f]}           # after last anchor - hold
+            else:
+                t = (frame_num - prev_f) / (next_f - prev_f)    # linear interpolation
+                px, py = anchors[prev_f]
+                nx, ny = anchors[next_f]
+                out[frame_num] = {1: (px + t * (nx - px), py + t * (ny - py))}
+
+        return out
+
+    # ── Rendering ─────────────────────────────────────────────────────────────
+
+    def draw_mini_court(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+        """Render the background, court surface, lines, and keypoints on every frame."""
+        for frame in frames:
+            self._draw_background(frame)
+            self._draw_court_surface(frame)
+        return frames
+
+    def _draw_background(self, frame: np.ndarray) -> None:
+        """Semi-transparent white panel behind the mini-court area."""
+        roi   = frame[self.start_y:self.end_y, self.start_x:self.end_x]
+        white = np.full_like(roi, 255)
+        frame[self.start_y:self.end_y, self.start_x:self.end_x] = (
+            cv2.addWeighted(roi, 0.5, white, 0.5, 0)
+        )
+
+    def _draw_court_surface(self, frame: np.ndarray) -> None:
+        """Fill court with surface colour, then draw lines, net, and keypoint markers."""
+        kp = self.drawing_key_points
+
+        # Court surface fill - outer corners in correct (non-self-intersecting) winding
+        surface  = np.zeros_like(frame)
+        corners  = np.array(
+            [[kp[0], kp[1]], [kp[2], kp[3]], [kp[6], kp[7]], [kp[4], kp[5]]],
+            dtype=np.int32,
+        ).reshape(-1, 1, 2)
+        cv2.fillPoly(surface, [corners], _COURT_FILL)
+        mask = np.any(surface != 0, axis=-1)
+        frame[mask] = cv2.addWeighted(frame, 0.1, surface, 0.9, 0)[mask]
+
+        # Court lines
+        for a, b in self.lines:
+            cv2.line(
+                frame,
+                (int(kp[a * 2]), int(kp[a * 2 + 1])),
+                (int(kp[b * 2]), int(kp[b * 2 + 1])),
+                _LINE_COLOR, 2,
+            )
+
+        # Net (midpoint between far and near baselines)
+        net_y = int((kp[1] + kp[5]) / 2)
+        cv2.line(frame, (int(kp[0]), net_y), (int(kp[2]), net_y), _NET_COLOR, 3)
+
+        # Keypoint markers
+        for i in range(0, len(kp), 2):
+            cx, cy = int(kp[i]), int(kp[i + 1])
+            cv2.circle(frame, (cx, cy), 5, _KP_OUTLINE, -1)
+            cv2.circle(frame, (cx, cy), 4, _KP_FILL,    -1)
+
+    def draw_points_on_mini_court(
+        self,
+        frames:     list[np.ndarray],
+        positions:  dict[int, dict],
+        color:      tuple[int, int, int] = (0, 255, 0),
+        draw_trail: bool = False,
+        label:      str | None = None,
+    ) -> list[np.ndarray]:
+        """
+        Render player or ball dots on the mini-court overlay.
+
+        Distinguishes players from the ball via the colour sentinel:
+          color=(0,255,0)   → green player circles
+          color=(0,255,255) → purple ball dots
+        """
+        is_ball = (color == (0, 255, 255))
+
+        for frame_num, frame in enumerate(frames):
+            if frame_num not in positions:
+                continue
+            for _, pos in positions[frame_num].items():
+                try:
+                    x, y = int(pos[0]), int(pos[1])
+                    if is_ball:
+                        cv2.circle(frame, (x, y), 9, _BALL_BG,   -1)
+                        cv2.circle(frame, (x, y), 7, _BALL_FILL, -1)
+                    else:
+                        cv2.circle(frame, (x, y), 10, _PLAYER_BG,   -1)
+                        cv2.circle(frame, (x, y),  8, _PLAYER_FILL, -1)
                 except (ValueError, TypeError):
-                    continue  # Skip invalid positions
-            
-            # Update position history
-            position_history.append(current_positions)
-        
+                    continue
+
         return frames
 
-    def draw_ball_trajectory(self, frames, positions):
+    def draw_ball_trajectory(
+        self,
+        frames:       list[np.ndarray],
+        positions:    dict[int, dict],
+        trail_length: int = 15,
+    ) -> list[np.ndarray]:
         """
-        Draw ball trajectory on frames with enhanced visualization
-        -
-        """
-        return frames
+        Draw a fading trail of the ball's recent mini-court positions.
 
-    def draw_background_rectangle(self, frame):
-        # Creating a smaller mask just for the rectangle area instead of the whole frame
-        # This significantly reduces memory usage
-        roi = frame[self.start_y:self.end_y, self.start_x:self.end_x].copy()
-        
-        # Create a white background of the same size as the ROI
-        white_bg = np.ones_like(roi) * 255
-        
-        # Blend the ROI with the white background (alpha blending)
-        alpha = 0.5
-        blended_roi = cv2.addWeighted(roi, alpha, white_bg, 1 - alpha, 0)
-        
-        # Place the blended ROI back into the original frame
-        frame[self.start_y:self.end_y, self.start_x:self.end_x] = blended_roi
-        
-        # Return the modified frame (no need to create a new copy)
-        return frame
+        For each frame, connects the ball's last `trail_length` positions with a
+        polyline that thins toward the oldest point (a simple, cheap fade - full
+        per-segment alpha blending isn't worth the extra draw calls for a small
+        mini-court panel) and applies one transparency pass so the trail doesn't
+        fully obscure the court beneath it.
+
+        Args:
+            frames:       output video frames (modified in place, also returned).
+            positions:    {frame_num: {1: (x, y)}} - e.g. from
+                          convert_ball_to_mini_court_coordinates.
+            trail_length: how many recent frames the trail covers.
+        """
+        for i, frame in enumerate(frames):
+            trail: list[tuple[int, int]] = []
+            for f in range(max(0, i - trail_length + 1), i + 1):
+                pos = positions.get(f, {}).get(1)
+                if pos is not None:
+                    trail.append((int(pos[0]), int(pos[1])))
+
+            if len(trail) < 2:
+                continue
+
+            overlay = frame.copy()
+            n = len(trail)
+            for j in range(1, n):
+                fade = j / n   # 0 (oldest) -> 1 (newest)
+                thickness = max(1, round(3 * fade))
+                cv2.line(overlay, trail[j - 1], trail[j], _BALL_FILL, thickness)
+
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+        return frames

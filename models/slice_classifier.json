@@ -1,0 +1,10 @@
+{
+  "model_type": "single_threshold",
+  "feature_name": "last_third_slope",
+  "threshold": -0.006740607518316191,
+  "predict_slice_if": "<=",
+  "held_out_test_accuracy": 0.8333333333333334,
+  "trained_on_clips": 171,
+  "tested_on_clips": 72,
+  "domain": "THETIS indoor-gym demonstration footage -- NOT validated on broadcast match play"
+}

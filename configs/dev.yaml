@@ -1,0 +1,17 @@
+# Development overrides - fast iteration on ONE clip.
+#
+# Configs are layered: built-in defaults ← configs/config.yaml ← this file. Only the
+# differences from the shipped config belong here; everything else (models, thresholds,
+# paths) comes from config.yaml, so this file cannot silently drift from production.
+#
+#   python main.py -c configs/dev.yaml
+#   tennis-vision analyze clip.mp4 -c configs/dev.yaml
+#
+# WARNING: a stub caches ONE video's detections. Switching input video while these are
+# on produces confident nonsense - detections from the previous clip mapped onto the
+# new one. Change input? Pass --no-stubs once to regenerate, or use the default config.
+# This is why the shipped default has them off.
+
+stubs:
+  use_player_stubs: true
+  use_ball_stubs: true
