@@ -9,7 +9,12 @@ pipeline:
   shot_classification: true    # Enable shot type classification
   use_homography: true         # Real perspective homography (vs. nearest-keypoint approx)
   use_tracknet: true          # true = TrackNet v2 ball detector; false = YOLO (set true after weights downloaded)
-  use_pose_shots: true         # pose-based forehand/backhand (falls back to position rules when pose is unavailable)
+  use_pose_shots: true
+  # Optional stronger pose backend for contact frames only. MediaPipe drops the occluded
+  # arm on 44-58% of backhands, which is the arm that decides forehand vs backhand.
+  # Weights are gated and under Meta's SAM License, so they are not shipped here:
+  #   python scripts/download_sam3d_body.py
+  use_sam3d_pose: false         # pose-based forehand/backhand (falls back to position rules when pose is unavailable)
 
 models:
   player: "yolov8x"
@@ -22,6 +27,7 @@ models:
   tracknet: "models/tracknet.pt"    # download: gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
   # download: curl -L -o models/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
   pose: "models/pose_landmarker_lite.task"
+  sam3d_body: "models/sam3d_body"
 
 io:
   input_video: "input_videos/input_video_2.mp4"

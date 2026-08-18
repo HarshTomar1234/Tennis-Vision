@@ -105,6 +105,44 @@ horizontally, which makes it independent of handedness, facing, and which side o
 court the player is on. That is the right idea and it is not sufficient, because a volley
 is played with the body square to the net and the arm never crosses the midline at all.
 
+## Optional: SAM 3D Body pose backend
+
+MediaPipe drops the racket arm on 44-58% of backhands (see Limitations). SAM 3D Body
+predicts a whole-body mesh and infers occluded joints instead of dropping them. On the
+exact frames MediaPipe could not complete, it returned keypoints on **6 of 6**
+(`eval/sam3d_occluded_arm_test.py`), and on a full backhand clip it completed 100% of
+frames against MediaPipe's 88%.
+
+It runs on **contact frames only**, roughly 15 per clip. At about 1.6s per frame a
+per-frame pass would take half an hour on a mid-range GPU; 30 inferences takes under a
+minute.
+
+```bash
+# 1. request access, then create a read token, then put HF_TOKEN in .env
+python scripts/download_sam3d_body.py
+
+# 2. the inference code is a separate repository
+git clone https://github.com/facebookresearch/sam-3d-body.git
+export SAM3D_BODY_CODE=/path/to/sam-3d-body
+
+# 3. enable it
+#    configs/config.yaml -> pipeline.use_sam3d_pose: true
+```
+
+Off by default, and the pipeline falls back to MediaPipe silently when the weights are
+absent.
+
+**On licensing.** The weights are under Meta's SAM License, not MIT. That licence grants
+free use, modification and derivative works, and requires anyone *redistributing* the
+materials to pass the same terms along. This project therefore does not bundle them:
+doing so would have an MIT licence make a promise about Meta's weights it has no standing
+to make. You fetch them under terms you accept directly, which is the same arrangement
+already used for the TrackNet weights.
+
+Verified working on a GTX 1050 Ti (4.3 GB) in float32. Do not wrap inference in
+`torch.autocast`: the MHR head is a TorchScript module and raises `NotImplementedError`
+inside one. Casting the weights fails in both directions as well.
+
 ## Measured results
 
 Scripts marked `(dataset)` need a third-party dataset that is over 7 GB and not
@@ -349,18 +387,21 @@ recognised.
   broadcast evidence that exists, and it does not support shipping the classifier. It is
   trained, measured and committed, and deliberately not wired into the pipeline.
 
-  The common cause of both failures is upstream. Pose extraction itself fails on backhands
-  roughly twice as often as on forehands, because the body turns away from the camera:
+  The common cause of both failures is upstream, and it is more specific than "pose
+  fails". MediaPipe finds the player on **100%** of frames and then omits the landmarks of
+  the occluded arm. On a backhand that is the racket arm:
 
-  | class | usable pose | class | usable pose |
+  | class | frames | no pose | most-missing landmarks |
   |---|---|---|---|
-  | forehand_volley | 97% | backhand_volley | **49%** |
-  | forehand_slice | 95% | backhand_slice | **54%** |
-  | forehand_flat | 88% | backhand | **62%** |
+  | backhand_volley | 117 | 0 | right elbow 68%, right wrist **58%** |
+  | backhand | 142 | 0 | right elbow 47%, right wrist **44%** |
+  | forehand_volley | 120 | 0 | left elbow 9%, left wrist 5% |
+  | forehand_flat | 146 | 0 | left elbow 25%, left wrist 23% |
 
-  So the forehand bias has two independent sources compounding: the classifier mislabels
-  backhands, and pose disproportionately misses them. A stronger pose model is the fix,
-  not a better classifier on the same landmarks.
+  Forehand versus backhand is decided by where that arm is, so both classifiers are
+  reading a hand that is often not there. That is why a stronger pose model is the fix
+  rather than a better classifier on the same landmarks, and it is measured by
+  `eval/pose_availability_at_contacts.py`.
 
 - **Volley and smash labels come from position rules with no ground truth.** Serve is now
   detected from physical evidence. Those two are not.

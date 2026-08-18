@@ -126,6 +126,8 @@ _DEFAULTS: dict = {
         "use_homography": True,
         "use_tracknet": True,
         "use_pose_shots": True,
+        # Off by default: the weights are optional, gated, and not redistributed here.
+        "use_sam3d_pose": False,
     },
     "models": {
         "player": "yolov8x",
@@ -135,6 +137,7 @@ _DEFAULTS: dict = {
         "court": "models/keypoints_model_geoaug.pth",
         "tracknet": "models/tracknet.pt",
         "pose": "models/pose_landmarker_lite.task",
+        "sam3d_body": "models/sam3d_body",
     },
     "io": {
         "input_video": "input_videos/input_video_2.mp4",
@@ -651,9 +654,32 @@ def main():
         # label with no real basis in position data, so that is the only one replaced.
         # See utils/pose_shot_classifier.py and docs/journal/0006.
         if cfg["pipeline"].get("use_pose_shots", False):
-            pose_estimator = PoseEstimator(
-                model_path=cfg["models"].get("pose", "models/pose_landmarker_lite.task")
-            )
+            # Optional SAM 3D Body backend, tried first when configured. It matters for
+            # exactly one thing: MediaPipe finds the player on every frame and then omits
+            # the occluded arm, which on a backhand is the racket arm 44-58% of the time
+            # (eval/pose_availability_at_contacts.py, eval/sam3d_occluded_arm_test.py).
+            # Since forehand versus backhand is decided by where that arm is, the label is
+            # being read from a hand that is often not there.
+            #
+            # It runs only on contact frames, roughly 15 per clip, because at 1.58s per
+            # frame a per-frame pass would take about 30 minutes on a mid-range GPU.
+            # Falls back silently to MediaPipe when the weights are absent, which is the
+            # default, since they are under Meta's SAM License and are not redistributed
+            # with this MIT project.
+            pose_estimator = None
+            if cfg["pipeline"].get("use_sam3d_pose", False):
+                from utils.sam3d_pose import Sam3dPoseEstimator
+                candidate = Sam3dPoseEstimator(
+                    weights_dir=cfg["models"].get("sam3d_body", "models/sam3d_body")
+                )
+                if candidate.available:
+                    pose_estimator = candidate
+                    logger.info("  Pose backend: SAM 3D Body")
+
+            if pose_estimator is None:
+                pose_estimator = PoseEstimator(
+                    model_path=cfg["models"].get("pose", "models/pose_landmarker_lite.task")
+                )
             if pose_estimator.available:
                 upgraded = 0
                 # "Groundstroke" is included deliberately, and leaving it out was a
