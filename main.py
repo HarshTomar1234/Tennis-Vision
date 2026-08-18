@@ -55,6 +55,7 @@ from utils.calibration_banner import draw_calibration_warning
 from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
+from utils.rally_audit import audit_rally
 from utils.trajectory_3d import crosses_net, reconstruct_rally
 from utils.viewer_3d import build_viewer, players_to_metres
 from utils.web_video import to_browser_playable
@@ -1002,9 +1003,29 @@ def main():
                 bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
                 if not players or bbox is None:
                     continue
+                # Nearest player in BOTH axes, measured to the player's box rather than
+                # to its centre.
+                #
+                # This compared horizontal distance only, and in a broadcast view both
+                # players sit near the centre line in x while being metres apart in y, so
+                # the comparison was close to meaningless: it attributed nearly every
+                # contact to the same player. The rally self-audit caught it, reporting
+                # one player hitting five times in succession, which is impossible in
+                # singles.
+                #
+                # Distance to the box, not to its centre, because a near player's box is
+                # tall: a ball at their feet is far from the box centre while being right
+                # on the player.
                 ball_x = (bbox[0] + bbox[2]) / 2.0
-                hitter = min(players, key=lambda pid: abs(
-                    (players[pid][0] + players[pid][2]) / 2.0 - ball_x))
+                ball_y = (bbox[1] + bbox[3]) / 2.0
+
+                def _box_distance(pid):
+                    bx1, by1, bx2, by2 = players[pid]
+                    dx = max(bx1 - ball_x, 0.0, ball_x - bx2)
+                    dy = max(by1 - ball_y, 0.0, ball_y - by2)
+                    return (dx * dx + dy * dy) ** 0.5
+
+                hitter = min(players, key=_box_distance)
                 px1, _, px2, py2 = players[hitter]
                 point = ((px1 + px2) / 2.0, float(py2))
                 hitter_by_frame[frame] = hitter
@@ -1087,6 +1108,21 @@ def main():
                 continue
             kept.append(t)
         trajectories_3d = kept
+
+    # Self-audit: what does the detected event sequence PROVE is missing, on this clip?
+    # Every other number in this pipeline comes from a labelled dataset and describes
+    # average behaviour. This one describes the video actually in front of the user, with
+    # no ground truth, by using the orderings a rally cannot physically produce.
+    rally = audit_rally(
+        ball_shot_frames,
+        bounce_frames,
+        hitter_by_frame=hitter_by_frame if "hitter_by_frame" in dir() else None,
+    )
+    logger.info(f"  Rally self-audit: {rally.summary()}")
+    for finding in rally.findings[:5]:
+        logger.info(f"    {finding}")
+    if len(rally.findings) > 5:
+        logger.info(f"    ... and {len(rally.findings) - 5} more")
 
     if trajectories_3d:
         speeds_3d = [t.speed_kmh for t in trajectories_3d]
