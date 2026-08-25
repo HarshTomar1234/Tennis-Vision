@@ -286,7 +286,15 @@ class PlayerTracker:
     
 
 
-    def detect_frames(self,frames, read_from_stub=False, stub_path=None):
+    def detect_frames(self,frames, read_from_stub=False, stub_path=None, save_stub=True):
+        """
+        Args:
+            save_stub: whether to cache these detections. Pass False when `frames` is a
+                truncated slice of the video: the cache is keyed by video name, so
+                writing a 40-frame run's detections there produces a file that claims to
+                describe the whole clip. Readers that check length recover; readers that
+                do not (tools/label_shots.py did not) silently use the wrong input.
+        """
         player_detections = []
 
         # A cache miss means "detect it now", not "crash". This raised FileNotFoundError
@@ -306,7 +314,7 @@ class PlayerTracker:
             player_dict = self.detect_frame(frame)
             player_detections.append(player_dict)
 
-        if stub_path is not None:
+        if stub_path is not None and save_stub:
             os.makedirs(os.path.dirname(stub_path) or ".", exist_ok=True)
             with open(stub_path, 'wb') as f:
                 pickle.dump(player_detections, f)

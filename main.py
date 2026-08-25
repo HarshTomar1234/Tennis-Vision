@@ -359,8 +359,18 @@ def main():
                      f"missing, empty, or in a codec OpenCV cannot decode.")
         sys.exit(1)
 
-    if args.max_frames and args.max_frames < len(video_frames):
-        logger.info(f"  Limiting to first {args.max_frames} frames (--max-frames)")
+    # A truncated run must never write a detection cache. The cache is keyed by video
+    # name, so a 40-frame --max-frames run would overwrite the full clip's cache with a
+    # file that describes the first 40 frames and claims to describe the clip. The
+    # readers that check length (main.py below, eval/_ball_source.py) recover from that;
+    # tools/label_shots.py did not, so the labelling tool could seed ground truth from
+    # 40 frames of a 570-frame video. The end-to-end smoke test runs exactly this way,
+    # so running the test suite was enough to trigger it.
+    truncated = bool(args.max_frames and args.max_frames < len(video_frames))
+    if truncated:
+        logger.info(f"  Limiting to first {args.max_frames} frames (--max-frames). "
+                    f"Detections from this run will NOT be cached, because they do not "
+                    f"describe the whole clip.")
         video_frames = video_frames[:args.max_frames]
 
     cap = cv2.VideoCapture(input_path)
@@ -384,6 +394,7 @@ def main():
         video_frames,
         read_from_stub=use_player_stubs,
         stub_path=player_stub,
+        save_stub=not truncated,
     )
     source = f"stub ({player_stub})" if use_player_stubs else "fresh YOLO"
     logger.info(f"  Source: {source}")
@@ -423,10 +434,13 @@ def main():
         else:
             logger.info("  TrackNet v2 (temporal heatmap, 3-frame context)")
             ball_detections = ball_tracker.detect_frames(video_frames)
-            Path(tracknet_stub).parent.mkdir(exist_ok=True)
-            with open(tracknet_stub, "wb") as f:
-                pickle.dump(ball_detections, f)
-            logger.info(f"  Saved TrackNet detections → {tracknet_stub}")
+            if truncated:
+                logger.info("  Not caching: this run was truncated by --max-frames.")
+            else:
+                Path(tracknet_stub).parent.mkdir(exist_ok=True)
+                with open(tracknet_stub, "wb") as f:
+                    pickle.dump(ball_detections, f)
+                logger.info(f"  Saved TrackNet detections → {tracknet_stub}")
     else:
         ball_tracker = BallTracker(model_path=cfg["models"]["ball"])
         use_ball_stubs = cfg["stubs"]["use_ball_stubs"]

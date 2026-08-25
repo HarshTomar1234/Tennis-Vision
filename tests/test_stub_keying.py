@@ -68,3 +68,82 @@ def test_matching_frame_count_is_accepted():
 def test_empty_stub_against_real_frames_is_rejected():
     """A truncated or half-written cache must not pass as valid."""
     assert not stub_matches_frames([], [None] * 570)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Truncated runs must not WRITE a cache
+# ─────────────────────────────────────────────────────────────────
+#
+# The two guards above are both on the READ side, and they were enough for every reader
+# that used them. The write side had no guard at all: a --max-frames run cached its
+# detections under the full clip's name, producing a file that describes 40 frames and
+# claims to describe 570.
+#
+# That is not hypothetical. The end-to-end smoke test runs with --max-frames 40, so
+# `pytest tests/` was itself sufficient to leave a truncated cache behind. Guarded
+# readers recovered. tools/label_shots.py did not, and it is the tool that produces the
+# ground truth every accuracy number in this project is measured against.
+
+import pickle
+
+import pytest
+
+from trackers.player_tracker import PlayerTracker
+
+
+def test_player_tracker_skips_caching_when_asked(tmp_path, monkeypatch):
+    """save_stub=False must leave no cache file behind, however detection went."""
+    tracker = PlayerTracker.__new__(PlayerTracker)
+    monkeypatch.setattr(PlayerTracker, "detect_frame", lambda self, frame: {1: [0, 0, 1, 1]})
+
+    stub = tmp_path / "player_detections.pkl"
+    out = tracker.detect_frames([None, None, None], stub_path=str(stub), save_stub=False)
+
+    assert len(out) == 3, "detection itself must still happen"
+    assert not stub.exists(), (
+        "a truncated run wrote a cache keyed to the whole clip, which is the defect"
+    )
+
+
+def test_player_tracker_caches_by_default(tmp_path, monkeypatch):
+    """The opposite case, so the guard above cannot be satisfied by never caching."""
+    tracker = PlayerTracker.__new__(PlayerTracker)
+    monkeypatch.setattr(PlayerTracker, "detect_frame", lambda self, frame: {1: [0, 0, 1, 1]})
+
+    stub = tmp_path / "player_detections.pkl"
+    tracker.detect_frames([None, None, None], stub_path=str(stub))
+
+    assert stub.exists()
+    with open(stub, "rb") as f:
+        assert len(pickle.load(f)) == 3
+
+
+def test_label_tool_refuses_a_stub_of_the_wrong_length(tmp_path, capsys):
+    """
+    The labelling tool must not seed from a cache that does not describe this clip.
+
+    Silence is the danger here: fewer candidates looks like a quiet clip, not like a
+    wrong input, so the tool has to say so.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools"))
+    from tools.label_shots import load_detections
+
+    stub = tmp_path / "ball.pkl"
+    with open(stub, "wb") as f:
+        pickle.dump([{1: [0, 0, 1, 1]}] * 40, f)     # a --max-frames 40 run
+
+    out = load_detections(str(stub), total_frames=570, what="Ball positions")
+
+    assert out == [], "a 40-frame cache must not be used for a 570-frame clip"
+    assert "IGNORING" in capsys.readouterr().out, "the refusal has to be visible"
+
+
+def test_label_tool_accepts_a_matching_stub(tmp_path):
+    from tools.label_shots import load_detections
+
+    stub = tmp_path / "ball.pkl"
+    with open(stub, "wb") as f:
+        pickle.dump([{1: [0, 0, 1, 1]}] * 570, f)
+
+    assert len(load_detections(str(stub), total_frames=570, what="Ball")) == 570

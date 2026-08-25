@@ -58,15 +58,19 @@ SHOT_TYPES = {
 FIELDNAMES = ["frame", "event", "player_id", "shot_type", "confidence", "notes"]
 
 
-def load_candidates(ball_stub: str) -> list[int]:
-    """Seed the candidate list from the existing reversal detector, if its output exists."""
-    if not Path(ball_stub).exists():
+def load_candidates(detections: list[dict]) -> list[int]:
+    """
+    Seed the candidate list from the existing reversal detector.
+
+    Takes detections rather than a path so it cannot re-read the stub without the
+    length check `load_detections` applies. Reading the same file twice, once guarded
+    and once not, is how the guard gets bypassed.
+    """
+    if not detections:
         return []
     try:
         from trackers.tracknet_ball_tracker import TrackNetBallTracker
 
-        with open(ball_stub, "rb") as f:
-            detections = pickle.load(f)
         tracker = TrackNetBallTracker(model_path="models/tracknet.pt")
         return tracker.get_ball_shot_frames(
             tracker.interpolate_ball_positions(detections)
@@ -76,11 +80,31 @@ def load_candidates(ball_stub: str) -> list[int]:
         return []
 
 
-def load_detections(path: str) -> list[dict]:
+def load_detections(path: str, total_frames: int, what: str) -> list[dict]:
+    """
+    Cached detections for this clip, or nothing if the cache does not describe it.
+
+    The length check is not paranoia. A stub is keyed by video name, and a truncated
+    run (`--max-frames`) used to overwrite the full clip's cache with a short one. The
+    end-to-end smoke test runs that way, so `pytest tests/` was enough to leave a
+    40-frame cache sitting at the 570-frame clip's path. Every other reader in the
+    project checks length; this one did not, and it is the worst place not to, because
+    what it produces is the ground truth every accuracy number is measured against.
+
+    Seeding from the wrong detections does not fail loudly. It shows fewer candidates,
+    the labeller works through them, and the resulting CSV silently describes a
+    fraction of the clip.
+    """
     if not Path(path).exists():
         return []
     with open(path, "rb") as f:
-        return pickle.load(f)
+        detections = pickle.load(f)
+    if len(detections) != total_frames:
+        print(f"  [stub] IGNORING {path}: it has {len(detections)} frames and this clip "
+              f"has {total_frames}. {what} will not be shown. Regenerate with a full "
+              f"run (no --max-frames) if you want them.")
+        return []
+    return detections
 
 
 def load_existing_labels(out_path: str) -> dict[int, dict]:
@@ -184,9 +208,9 @@ def main() -> None:
     frames = read_video(args.video)
     total  = len(frames)
 
-    ball_dets   = load_detections(ball_stub)
-    player_dets = load_detections(player_stub)
-    candidates  = set(load_candidates(ball_stub))
+    ball_dets   = load_detections(ball_stub, total, "Ball positions and candidates")
+    player_dets = load_detections(player_stub, total, "Player boxes")
+    candidates  = set(load_candidates(ball_dets))
     labels      = load_existing_labels(out_path)
 
     print(f"  {total} frames | {len(candidates)} detector candidates | "
