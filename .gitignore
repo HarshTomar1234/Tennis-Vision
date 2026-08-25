@@ -40,7 +40,16 @@ Thumbs.db
 
 # ── Local-only dev files (not for contributors) ──
 CLAUDE.md
-docs/
+
+# docs/ is the internal record: the engineering journal, specs, scratch analysis and
+# unfinished reasoning. It stays private. Public reproducibility is not the same thing
+# as a public internal journal, so the carve-out below is deliberately narrow: only
+# docs/public/ ships, and only material written to be read by a stranger goes in it.
+#
+# If a production comment cites a private path under docs/, fix the comment. Do not
+# widen this rule to make the citation resolve.
+docs/*
+!docs/public/
 learning_notes/
 analysis/
 audit_frames/
