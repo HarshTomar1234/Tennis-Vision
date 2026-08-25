@@ -53,7 +53,8 @@ from utils import (
     stub_path_for_video,
 )
 from utils.bounce_candidates import detect_bounce_candidates
-from utils.calibration_banner import draw_calibration_warning
+from utils.calibration_banner import draw_calibration_warning, draw_frame_rate_warning
+from utils.fps_support import SUPPORTED_MAX_FPS, SUPPORTED_MIN_FPS, assess_fps
 from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
@@ -242,7 +243,8 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                court_fit: tuple[bool, float] | None = None,
                serve_speed_kmh: float = 0.0,
                trajectories_3d: list | None = None,
-               calibration: dict | None = None):
+               calibration: dict | None = None,
+               fps_support: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -282,6 +284,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                 "positions are derived from an unreliable court and should not be "
                 "treated as measurements."
             )
+    if fps_support:
+        # Whether this clip's frame rate is one the published accuracy numbers were
+        # measured on. Every event threshold here is counted in frames, so this is a
+        # precondition for those numbers applying at all, not a footnote.
+        summary["frame_rate_support"] = fps_support
     if calibration:
         # How the coordinates in this run were actually produced. A consumer cannot tell
         # a homography-mapped position from a nearest-keypoint approximation by looking
@@ -380,14 +387,31 @@ def main():
         video_frames = video_frames[:args.max_frames]
 
     cap = cv2.VideoCapture(input_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    header_fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
-    if not fps or fps <= 0:
+
+    # Assess BEFORE defaulting, so "header unreadable" is not silently reported as 30 fps
+    # and then judged as supported. See utils/fps_support.py for the measurement behind
+    # the range.
+    fps_support = assess_fps(header_fps)
+    fps = header_fps if header_fps and header_fps > 0 else 30.0
+    if not header_fps or header_fps <= 0:
         logger.warning("Could not read FPS from video header, defaulting to 30")
-        fps = 30.0
 
     logger.info(f"  {len(video_frames)} frames | {fps:.1f} fps | "
                 f"{video_frames[0].shape[1]}×{video_frames[0].shape[0]}px")
+
+    # Every event threshold in this pipeline is counted in frames and every classifier
+    # velocity is pixels per frame, so a clip sampled at a rate the measured record does
+    # not cover produces a different event set for the same tennis. The pipeline still
+    # runs, because refusing the clip is worse than analysing it with the caveat
+    # attached, but nothing about the run claims the accuracy measured inside the band.
+    if fps_support.status == "supported":
+        logger.info(f"  Frame rate: supported. {fps_support.reason}")
+    elif fps_support.status == "partially_supported":
+        logger.warning(f"  Frame rate: PARTIALLY SUPPORTED. {fps_support.reason}")
+    else:
+        logger.warning(f"  Frame rate: UNSUPPORTED. {fps_support.reason}")
 
     # ── 2. Player detection ────────────────────────────────────────
     logger.info("[2/9] Player detection...")
@@ -1223,7 +1247,8 @@ def main():
                        f"approximation, which cannot correct perspective. Positions on "
                        f"those frames are approximate."
                    )} if use_hom and approx_frames else {}),
-               })
+               },
+               fps_support=fps_support.as_dict())
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")
@@ -1289,6 +1314,15 @@ def main():
         # fitted to the crowd. Drawn LAST so no panel can paint over the warning.
         logger.debug("  Stamping calibration warning...")
         output_frames = draw_calibration_warning(output_frames, line_support)
+    elif not fps_support.is_supported:
+        # Only when the court IS valid, so the two banners cannot fight for the same
+        # band. A failed court fit is the more serious of the two and keeps the space:
+        # if the court is wrong, the frame rate is the smaller of the reader's problems.
+        logger.debug("  Stamping frame-rate warning...")
+        output_frames = draw_frame_rate_warning(
+            output_frames, fps_support.fps, fps_support.status,
+            (SUPPORTED_MIN_FPS, SUPPORTED_MAX_FPS),
+        )
 
     # Save output
     output_path = cfg["io"]["output_video"]
