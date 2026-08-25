@@ -328,6 +328,32 @@ and on precision they disagree with this clip.
 | Shot-frame precision | 46.7%, 8 false positives in 15 reported, F1 0.636 | same |
 | Ball speed plausibility (a range check, **not** accuracy) | 21/21 within physical bounds | `eval/speed_accuracy.py` |
 
+### Runtime
+
+Measured, on the hardware this project is developed on. No real-time claim is made and
+none is close.
+
+Reference clip: `input_video_2.mp4`, 570 frames, 1280x720, 30 fps, **19.0 s of video**.
+Hardware: **NVIDIA GTX 1050 Ti (4 GB), CUDA, PyTorch 2.13, Python 3.12**.
+
+| Run | Wall clock | vs real time |
+|---|---|---|
+| Full analysis, fresh detection (`--no-stubs`, the default) | **5 m 51 s** | 18.5x slower |
+| Re-analysis with cached detections (`-c configs/dev.yaml`) | **1 m 04 s** | 3.4x slower |
+
+Where the time goes on a fresh run: YOLOv8x player detection **2 m 35 s**, TrackNet plus
+per-frame court keypoints **2 m 35 s**, everything else including rendering about 40 s.
+The two detectors are essentially the whole cost, and both scale linearly with frame
+count, so a 2-minute clip is roughly 35 minutes on this card.
+
+A modern GPU will be considerably faster and is not measured here, because publishing a
+number from hardware nobody ran would be the sort of estimate this README exists to avoid.
+Use `--max-frames 60` for a quick check before committing to a full clip.
+
+Caching is off by default on purpose: a stub holds one video's detections, and loading it
+while analysing a different clip produces confident nonsense. `configs/dev.yaml` turns it
+on for repeated runs against the same clip.
+
 ### Test suite
 
 **350 unit and integration tests** (`pytest tests/`), covering ball-state classification,

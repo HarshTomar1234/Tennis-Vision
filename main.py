@@ -254,7 +254,8 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                trajectories_3d: list | None = None,
                calibration: dict | None = None,
                fps_support: dict | None = None,
-               rally_decoding: dict | None = None):
+               rally_decoding: dict | None = None,
+               shot_classification: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -299,6 +300,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         # measured on. Every event threshold here is counted in frames, so this is a
         # precondition for those numbers applying at all, not a footnote.
         summary["frame_rate_support"] = fps_support
+    if shot_classification:
+        # What the shot layer actually decided, and on what basis. The physics counts in
+        # particular: a layer that only ever removes labels is a validation filter, and
+        # calling it a classifier in public would overstate it.
+        summary["shot_classification"] = shot_classification
     if rally_decoding:
         # What the rally grammar had to repair to make this sequence possible, and how
         # hard it had to fight the classifier to do it. A consumer cannot audit a rally
@@ -685,6 +691,13 @@ def main():
 
     # ── 8. Shot classification ─────────────────────────────────────
     shot_classifications: dict = {}
+    # Counts for summary.json. The physics layer's observed behaviour on the reference
+    # clip is 0 shots positively evidenced and 7 unevidenced Volley/Smash downgraded, so
+    # on that clip it acts purely as a filter. Emitting the counts lets that be measured
+    # across clips (eval/physics_evidence_rate.py) rather than argued about, and decides
+    # whether the public wording should say "classifier" or "validation".
+    physics_evidenced = 0
+    physics_downgraded = 0
     if cfg["pipeline"]["shot_classification"]:
         logger.info("[8/9] Classifying shots...")
         sc_cfg = cfg.get("shot_classifier", {})
@@ -765,6 +778,7 @@ def main():
                 info["shot_type"] = "Groundstroke"
                 downgraded += 1
 
+        physics_evidenced, physics_downgraded = len(physics_calls), downgraded
         if physics_calls or downgraded:
             logger.info(f"  Physics shot evidence: {len(physics_calls)} shot(s) evidenced"
                         f"{', ' + str(downgraded) + ' unevidenced Volley/Smash downgraded' if downgraded else ''}")
@@ -1355,7 +1369,15 @@ def main():
                    )} if use_hom and approx_frames else {}),
                },
                fps_support=fps_support.as_dict(),
-               rally_decoding=decode_diagnostics or None)
+               rally_decoding=decode_diagnostics or None,
+               shot_classification={
+                   "shots": len(shot_classifications),
+                   "types": dict(Counter(v["shot_type"]
+                                         for v in shot_classifications.values())),
+                   "serve_evidenced": len(serve_frames_found),
+                   "physics_evidenced": physics_evidenced,
+                   "physics_downgraded_to_groundstroke": physics_downgraded,
+               } if shot_classifications else None)
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")
