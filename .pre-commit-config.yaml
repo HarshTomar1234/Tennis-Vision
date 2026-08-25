@@ -21,7 +21,13 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
-      # Lint only, and only for genuine errors: undefined names, unused imports,
-      # bare excepts. No formatting, no opinionated style rules.
+      # Lint only, and only for genuine errors: syntax, undefined names, redefinitions.
+      # No formatting, no opinionated style rules.
+      #
+      # Scope matches .github/workflows/ci.yml exactly, so a green pre-commit means a
+      # green CI. It deliberately excludes F401 (unused import), for two reasons:
+      # utils/__init__.py is a re-export module where every import is "unused" by that
+      # rule's definition, and `--fix` would have DELETED those re-exports and broken
+      # the package on the next commit anyone made to that file.
       - id: ruff
-        args: ["--select=F,E9", "--fix"]
+        args: ["--select=E9,F821,F811,F823"]

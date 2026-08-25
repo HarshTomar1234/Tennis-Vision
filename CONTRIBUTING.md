@@ -26,17 +26,31 @@ Thank you for your interest in contributing to Tennis-Vision! This document prov
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    
-   # Install dependencies
-   pip install -r requirements.txt
-   
-   # Install development dependencies
-   pip install pytest black flake8 pre-commit
+   # Install the project and its development extras
+   pip install -e ".[dev]"
+   pip install pre-commit
    ```
 
 3. **Set up pre-commit hooks**
    ```bash
    pre-commit install
    ```
+
+   The hooks lint for genuine errors only (syntax, undefined names, redefinitions)
+   and do not reformat. This codebase predates any formatter, so turning one on now
+   would bury real changes under thousands of reformatting lines. There is no `black`
+   or `flake8` step; `.pre-commit-config.yaml` uses `ruff` at the same scope CI does,
+   so a green pre-commit means a green CI.
+
+4. **Run the tests**
+   ```bash
+   pytest tests/                  # everything, needs the model weights
+   pytest tests/ -m "not slow"    # what CI runs; no weights needed
+   ```
+
+   The `slow` marker covers the end-to-end smoke test, which runs the real pipeline
+   and needs the downloadable weights. Without them it skips with the command that
+   fetches them rather than failing.
 
 ## How to Contribute
 

@@ -81,3 +81,14 @@ py-modules = ["main", "cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Registered here rather than in a pytest.ini, because pytest.ini was gitignored: a
+# fresh clone had no marker registration and every run printed PytestUnknownMarkWarning
+# for a marker the suite genuinely uses. Config lives with the packaging metadata now,
+# so a clone and this machine run the same suite.
+markers = [
+    "slow: runs the real pipeline end to end, and needs the downloadable model weights",
+]
+# An unregistered marker is a silent typo: `@pytest.mark.slwo` would deselect nothing
+# and warn instead of failing. Making it an error keeps `-m 'not slow'` trustworthy,
+# which CI depends on.
+addopts = "--strict-markers"

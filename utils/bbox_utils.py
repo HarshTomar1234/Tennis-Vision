@@ -30,9 +30,5 @@ def get_height_of_bbox(bbox):
 
 def measure_xy_distance(p1,p2):
     return abs(p1[0]-p2[0]), abs(p1[1]-p2[1])
-
-
-def get_center_of_bbox(bbox):
-    return (int((bbox[0]+bbox[2])/2),int((bbox[1]+bbox[3])/2))
     
 

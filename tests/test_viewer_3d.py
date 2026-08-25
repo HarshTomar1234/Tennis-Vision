@@ -199,7 +199,7 @@ def test_handles_no_segments(tmp_path):
 # since a standing player is on the ground by definition, so unlike ball height these
 # coordinates are measured rather than modelled.
 
-from utils.viewer_3d import COURT_LENGTH_M, COURT_WIDTH_DOUBLES_M, players_to_metres
+from utils.viewer_3d import players_to_metres
 
 
 def test_mini_court_origin_maps_to_court_origin():

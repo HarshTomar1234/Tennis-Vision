@@ -1,0 +1,77 @@
+# Tennis-Vision CI
+#
+# One question, answered on every push: does a fresh checkout install and pass its
+# tests? Nothing more. The project's claim is that its numbers are reproducible, and a
+# suite that only passes on the author's machine cannot support that claim.
+#
+# What is deliberately NOT here:
+#
+#   - The end-to-end smoke test (-m "not slow"). It needs about 140 MB of model
+#     weights, two of which are not ours to redistribute and one of which is behind a
+#     Google Drive link. Deselecting it is stated here and in the job name rather than
+#     left for a reader to discover; it still runs locally for anyone who has run
+#     scripts/download_models.py, and it skips with that instruction for anyone who has
+#     not (see tests/test_pipeline.py).
+#
+#   - GPU jobs. Every measured number in the README comes from a local GPU run and is
+#     reproduced by the eval scripts, not by CI.
+#
+#   - The dataset evals. They need a 7 GB third-party download that is not
+#     redistributable (datasets/README.md).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python }}, unit + integration, no weights)
+    runs-on: ubuntu-latest
+    strategy:
+      # 3.12 is the version this project is developed and measured on. 3.10 is the
+      # floor claimed by pyproject's requires-python, and it is here to find out
+      # whether that claim is true rather than to assume it. fail-fast off so one
+      # version failing still reports the other.
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install CPU torch first
+        # Without this the resolver pulls the CUDA build: about 2.5 GB of wheels for a
+        # runner with no GPU. Installing from the CPU index first pins the variant, and
+        # the editable install below then finds torch already satisfied.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+
+      - name: Install the package as a user would
+        # Editable install of the real package, not requirements.txt, because this is
+        # the path the README documents and the path tests/test_packaging.py guards.
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest tests/ -m "not slow" -q
+
+  lint:
+    name: lint (errors only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pipx install ruff
+      # Scope: rules that catch defects, not style. F401 (unused import) and F541 are
+      # excluded deliberately: utils/__init__.py is a re-export module where "unused"
+      # imports are the point, and the codebase predates any linter. Widening this is
+      # post-launch cleanup, not a launch requirement.
+      - run: ruff check --select=E9,F821,F811,F823 .

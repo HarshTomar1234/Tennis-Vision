@@ -23,6 +23,25 @@ import numpy as np
 # Ensure repo root is on path when pytest is run from any directory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+REPO_ROOT = Path(__file__).parent.parent
+
+# Weights the end-to-end smoke test genuinely cannot run without. They are downloaded
+# rather than committed (two of them are not ours to redistribute), so a fresh clone has
+# none of them and the smoke test used to fail with a subprocess traceback that said
+# nothing about the cause. It now skips with the command that fixes it.
+#
+# This is a skip, not a silent pass: pytest reports it by name with this reason, and CI
+# deselects it explicitly with -m "not slow" rather than letting it disappear quietly.
+REQUIRED_WEIGHTS = (
+    "models/tracknet.pt",
+    "models/keypoints_model_geoaug.pth",
+    "models/pose_landmarker_lite.task",
+)
+
+
+def _missing_weights() -> list[str]:
+    return [w for w in REQUIRED_WEIGHTS if not (REPO_ROOT / w).exists()]
+
 
 # ─────────────────────────────────────────────────────────────────
 # Config tests
@@ -225,6 +244,14 @@ def test_full_pipeline_smoke(tmp_path):
 
     Requires the model weights: python scripts/download_models.py
     """
+    missing = _missing_weights()
+    if missing:
+        pytest.skip(
+            "end-to-end smoke test needs the downloadable model weights, missing: "
+            + ", ".join(missing)
+            + ". Fetch them with: python scripts/download_models.py"
+        )
+
     import subprocess, shutil
 
     out_video = str(tmp_path / "smoke_output.avi")

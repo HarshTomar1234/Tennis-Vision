@@ -1,5 +1,8 @@
 # Tennis-Vision
 
+[![CI](https://github.com/HarshTomar1234/Tennis-Vision/actions/workflows/ci.yml/badge.svg)](https://github.com/HarshTomar1234/Tennis-Vision/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Tennis match analysis from a single broadcast camera: ball tracking, court geometry,
 player tracking, shot classification and 3-D trajectory reconstruction.
 
@@ -528,7 +531,8 @@ Ordered by measured value, not by interest.
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/                                       # 244 tests
+pytest tests/                                       # 244 tests, needs the weights
+pytest tests/ -m "not slow"                         # 243, what CI runs, no weights
 
 python eval/shot_frame_accuracy.py                  # reference clip, ships with repo
 python eval/speed_accuracy.py                       # reference clip, ships with repo
