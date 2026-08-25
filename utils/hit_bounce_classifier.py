@@ -418,6 +418,24 @@ def striking_side(
     return nearest if box_distance(nearest) <= max_distance_px else None
 
 
+class DecodeNotes(list):
+    """
+    The decoder's human-readable notes, carrying its machine-readable account alongside.
+
+    A plain list, so every existing caller keeps working: `derive_shot_frames` has six
+    of them across main.py and the evals, all unpacking a 4-tuple and most ignoring this
+    element entirely. Widening the return signature would have churned five evals that
+    are currently correct, for the sake of a diagnostic only main.py reads.
+
+    `.diagnostics` is the dict that reaches summary.json. See
+    utils.rally_decode.DecodedRally.diagnostics for what it contains and why it matters:
+    the decoder's own docstring warns that repeatedly overruling a confident classifier
+    signals an upstream problem, and until now that warning existed only in the log.
+    """
+
+    diagnostics: dict = {}
+
+
 def derive_shot_frames(
     ball_tracker,
     ball_detections: list[dict],
@@ -508,11 +526,12 @@ def derive_shot_frames(
         deletion_prior = MEASURED_DELETION_PRIOR
     decoded = decode_rally(events, deletion_prior=deletion_prior)
 
-    notes = list(decoded.flips)
+    notes = DecodeNotes(decoded.flips)
     if decoded.discarded:
         notes.append(
             f"{len(decoded.discarded)} candidate(s) discarded as spurious at frames "
             f"{decoded.discarded}: no legal place in the rally, and dropping them was a "
             f"better explanation than promoting them"
         )
+    notes.diagnostics = decoded.diagnostics()
     return decoded.contacts, decoded.bounces, raw_reversals, notes

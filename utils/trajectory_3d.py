@@ -35,8 +35,27 @@ measurements this pipeline can trust.
 `speed_kmh` is then the true 3-D speed at the start of the segment, including the
 vertical component the floor projection discarded.
 
-Honest limits
--------------
+Honest limits, ordered by measured size
+---------------------------------------
+This list used to name drag, spin and contact height, and to omit the term that turns
+out to dominate all of them. `eval/speed_timing_sensitivity.py` perturbs each source by
+its own measured uncertainty on the reference clip's 25 real segments:
+
+    source of error                     mean    median   worst
+    event timing (+/- 2.4 frames)      12.5%    12.2%    28.0%
+    contact height (+/- 0.20 m)         0.7%     0.2%     3.5%
+    ball localization (+/- 0.09 m)      0.1%     0.1%     0.7%
+
+- **Event timing dominates, by roughly 18x over contact height.** `T` comes from event
+  FRAMES, and the measured mean event offset is 2.4 frames (README, 25-clip sample).
+  Speed is (distance / T), so that error passes straight through and scales as 1/T:
+  flights under 0.5 s average 23.9% sensitivity, flights over 1.0 s average 6.5%. A
+  reconstructed speed is therefore about as accurate as the event detector is punctual,
+  and no amount of better geometry improves it.
+- **Contact height is nearly free.** The +/- 0.20 m tolerance this module already called
+  negligible is negligible: 0.2% median. That claim is now measured rather than asserted.
+- **Ball localization is nearly free** for speed, at 0.1% median. It still bounds landing
+  positions, which is a different question.
 - **Drag is not modelled.** A real ball decelerates through flight, so the constant
   horizontal velocity here is an average over the segment rather than the speed at
   contact. Expect readings below a radar gun's, which measures at contact. This is
@@ -44,11 +63,17 @@ Honest limits
 - **Spin (the Magnus effect) is not modelled.** Heavy topspin bends a trajectory
   downward faster than gravity alone; this reconstruction will place the apex slightly
   high on such shots.
-- Contact height is estimated, not measured (see `estimate_contact_height`), because
-  a racket strike is the one endpoint that is genuinely not on the floor.
 
-Both simplifications are documented rather than hidden, and both are strict
-improvements on projecting an airborne ball through a floor homography.
+The ordering matters for what to fix next. Adding drag or Magnus terms to a speed whose
+dominant error is a 2.4-frame timing offset would be modelling the small terms while the
+large one goes unaddressed.
+
+Not every segment is a shot
+---------------------------
+A rally alternates contact, bounce, contact. Only a segment that BEGINS at a racket
+contact is a ball leaving a racket. A segment that begins at a bounce is the post-bounce
+leg travelling to the receiver: a real part of the ball's path, correctly reconstructed,
+and not a shot. See `classify_segment_speed`.
 """
 from __future__ import annotations
 
@@ -262,3 +287,81 @@ def reconstruct_rally(
         trajectories.append(segment)
 
     return trajectories
+
+
+# ── Speed validity ─────────────────────────────────────────────────────────────
+
+VALID = "valid"
+PLAUSIBLE_BUT_UNCERTAIN = "plausible_but_uncertain"
+OUTLIER = "outlier"
+NOT_A_SHOT = "not_a_shot"
+
+# Below this flight duration the measured timing sensitivity exceeds about 20%, so the
+# speed is real but should not be read to the nearest km/h. Taken from
+# eval/speed_timing_sensitivity.py: flights under 0.5 s average 23.9% sensitivity to a
+# 2.4-frame event offset, flights over 1.0 s average 6.5%. This is not a plausibility
+# threshold on the speed itself, which would be inventing a number; it is the point where
+# this pipeline's own event-timing error stops being a rounding detail.
+SHORT_FLIGHT_S = 0.5
+
+
+def classify_segment_speed(
+    starts_at_contact: bool,
+    ends_at_bounce: bool,
+    crosses_the_net: bool,
+    duration_s: float,
+) -> tuple[str, str]:
+    """
+    Whether a reconstructed segment's speed is a shot speed, and how much to trust it.
+
+    Deliberately not a threshold on km/h. A speed bound would have been the easy answer
+    to a 17.6 km/h reading on the reference clip, and it would have been the wrong one:
+    the reading is not a physics failure, it is a labelling failure. Three explanations
+    were tested against the data before writing this (see the commit that added it):
+
+    1. "Endpoints outside the baseline mark a bad segment." REFUTED. 18 of 25 segments
+       have one, including the three fastest, because a contact endpoint is the player's
+       FEET and players stand behind the baseline constantly.
+    2. "Slow segments are the ones that never cross the net." True but not a defect. A
+       ball that bounces on the receiver's side and is then struck by the receiver
+       legitimately stays on one side, and that leg is short and slow by nature.
+    3. "Shot speed is aggregating legs that are not shots." This is the real one. Of 25
+       segments, only 14 begin at a racket contact. The other 11 are post-bounce legs,
+       correctly reconstructed and not shots, and averaging them into a figure labelled
+       "shot speed" is what produced the odd number.
+
+    Args:
+        starts_at_contact: the segment begins at a racket strike rather than a bounce.
+        ends_at_bounce:    the segment ends at a floor bounce rather than a strike.
+        crosses_the_net:   the flight passes from one side of the net to the other.
+        duration_s:        flight time.
+
+    Returns:
+        (status, reason). Callers should present an OUTLIER or NOT_A_SHOT segment
+        without a speed rather than with one.
+    """
+    if not starts_at_contact:
+        return NOT_A_SHOT, (
+            "begins at a bounce, so it is the ball travelling from the bounce to the "
+            "receiver rather than a ball leaving a racket"
+        )
+
+    if ends_at_bounce and not crosses_the_net:
+        # Struck, and landing on the striker's own side without crossing. In tennis that
+        # is a ball into the net or a mishit, and in either case the free-flight
+        # assumption is broken: the reconstruction models an uninterrupted parabola.
+        # More often on real footage it means the contact was misdetected. Same physics
+        # as the existing contact-to-contact net-crossing rule, one step further.
+        return OUTLIER, (
+            "struck and landing on the striker's own side without crossing the net, so "
+            "either the ball did not complete a free flight or the contact was "
+            "misdetected"
+        )
+
+    if duration_s < SHORT_FLIGHT_S:
+        return PLAUSIBLE_BUT_UNCERTAIN, (
+            f"flight of {duration_s:.2f} s is short enough that this pipeline's measured "
+            f"2.4-frame event-timing offset moves the speed by roughly 20% or more"
+        )
+
+    return VALID, "free flight between a racket contact and a known endpoint"

@@ -592,13 +592,22 @@ if (!DATA.segments.length) {
 DATA.segments.forEach((s, i) => {
   const b = document.createElement('button');
   b.className = 'seg'; b.setAttribute('aria-selected', 'false');
+  // A speed is only shown where it means "how fast the ball left the racket". A
+  // post-bounce leg is real geometry and not a shot, so it gets its kind instead of a
+  // number, and an uncertain one is marked rather than printed to the km/h.
+  const shown = (s.speed_status === 'valid' || s.speed_status === 'plausible_but_uncertain');
+  const speedText = shown
+    ? `${s.speed_kmh.toFixed(0)} km/h${s.speed_status === 'plausible_but_uncertain' ? ' ?' : ''}`
+    : (s.speed_status === 'not_a_shot' ? 'after bounce' : 'not a shot speed');
   b.innerHTML =
     `<span class="top"><span class="name">${s.label}</span>` +
-    `<span class="kmh">${s.speed_kmh.toFixed(0)} km/h</span></span>` +
+    `<span class="kmh">${speedText}</span></span>` +
     `<span class="sub2">apex ${s.apex_m.toFixed(1)} m · ` +
     `${(s.end_s - s.start_s).toFixed(2)} s · f${s.start_frame}–${s.end_frame}</span>` +
     `<details><summary>evidence</summary>` +
-    s.evidence.map(e => `<div class="ev">• ${e}</div>`).join('') + `</details>`;
+    s.evidence.map(e => `<div class="ev">• ${e}</div>`).join('') +
+    (s.speed_status_reason ? `<div class="ev">• ${s.speed_status_reason}</div>` : '') +
+    `</details>`;
   b.onclick = () => select(i);
   list.appendChild(b);
 });
@@ -783,6 +792,13 @@ def build_viewer(
             "speed_kmh": round(t.speed_kmh, 1),
             "apex_m": round(t.apex_height_m, 2),
             "label": shot_types.get(t.start_frame) or "Flight",
+            # What kind of measurement this segment's speed is. The viewer draws every
+            # reconstructed segment, including the post-bounce legs, and those are real
+            # geometry but not shots. Showing "17 km/h" against a segment the summary
+            # deliberately excluded would put the two outputs in contradiction.
+            # See utils.trajectory_3d.classify_segment_speed.
+            "speed_status": getattr(t, "speed_status", "valid"),
+            "speed_status_reason": getattr(t, "speed_status_reason", ""),
             "points": [[round(c, 3) for c in p] for p in t.points],
             "evidence": _segment_evidence(t, fps),
         })

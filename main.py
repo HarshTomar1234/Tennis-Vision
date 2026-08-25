@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -59,7 +60,15 @@ from utils.serve_detector import detect_serve_frames
 from utils.serve_landing import find_serve_landing
 from utils.shot_physics import classify_from_physics, is_lob
 from utils.rally_audit import audit_rally
-from utils.trajectory_3d import crosses_net, reconstruct_rally
+from utils.trajectory_3d import (
+    NOT_A_SHOT,
+    OUTLIER,
+    PLAUSIBLE_BUT_UNCERTAIN,
+    VALID,
+    classify_segment_speed,
+    crosses_net,
+    reconstruct_rally,
+)
 from utils.viewer_3d import build_viewer, players_to_metres
 from utils.web_video import to_browser_playable
 from utils.serve_speed import bounce_is_in_service_box, find_serve_and_bounce, serve_speed_kmh
@@ -244,7 +253,8 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                serve_speed_kmh: float = 0.0,
                trajectories_3d: list | None = None,
                calibration: dict | None = None,
-               fps_support: dict | None = None):
+               fps_support: dict | None = None,
+               rally_decoding: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -289,6 +299,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         # measured on. Every event threshold here is counted in frames, so this is a
         # precondition for those numbers applying at all, not a footnote.
         summary["frame_rate_support"] = fps_support
+    if rally_decoding:
+        # What the rally grammar had to repair to make this sequence possible, and how
+        # hard it had to fight the classifier to do it. A consumer cannot audit a rally
+        # without seeing the repairs.
+        summary["rally_decoding"] = rally_decoding
     if calibration:
         # How the coordinates in this run were actually produced. A consumer cannot tell
         # a homography-mapped position from a nearest-keypoint approximation by looking
@@ -297,15 +312,44 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
     if trajectories_3d:
         # Speeds here include the vertical component the floor projection discards, so
         # they are not comparable with avg_shot_speed_*_kmh above and are named apart.
-        speeds = [t.speed_kmh for t in trajectories_3d]
-        summary["shot_speed_3d_kmh"] = {
-            "segments": len(speeds),
-            "mean": round(sum(speeds) / len(speeds), 1),
-            "max": round(max(speeds), 1),
-            "note": ("Free-flight reconstruction between floor-anchored events. "
-                     "Average over each segment, so below a radar reading at contact; "
-                     "drag and spin are not modelled."),
-        }
+        #
+        # Only segments that BEGIN at a racket contact are shots. A segment beginning at
+        # a bounce is the ball travelling from the bounce to the receiver: a real part of
+        # the path, correctly reconstructed, and not a shot. Averaging those into a
+        # figure labelled "shot speed" is what produced a 17.6 km/h reading on the
+        # reference clip, and no speed threshold would have been the right fix for it.
+        # See utils.trajectory_3d.classify_segment_speed.
+        shots = [t for t in trajectories_3d
+                 if getattr(t, "speed_status", VALID) in (VALID, PLAUSIBLE_BUT_UNCERTAIN)]
+        excluded = len(trajectories_3d) - len(shots)
+        if shots:
+            speeds = [t.speed_kmh for t in shots]
+            uncertain = sum(1 for t in shots
+                            if getattr(t, "speed_status", VALID) == PLAUSIBLE_BUT_UNCERTAIN)
+            summary["shot_speed_3d_kmh"] = {
+                "segments": len(speeds),
+                "mean": round(sum(speeds) / len(speeds), 1),
+                "max": round(max(speeds), 1),
+                "min": round(min(speeds), 1),
+                "segments_uncertain": uncertain,
+                "segments_excluded": excluded,
+                "note": ("Free-flight reconstruction, counting only segments that begin "
+                         "at a racket contact. Average over each segment, so below a "
+                         "radar reading at contact; drag and spin are not modelled. The "
+                         "dominant error is event timing: a 2.4-frame offset moves these "
+                         "by about 12% on average and 24% on flights under 0.5 s "
+                         "(eval/speed_timing_sensitivity.py). Uncertain segments are "
+                         "those short flights; excluded ones are post-bounce legs and "
+                         "any segment whose geometry says it was not a completed shot."),
+            }
+        else:
+            summary["shot_speed_3d_kmh"] = {
+                "segments": 0,
+                "segments_excluded": excluded,
+                "status": "unavailable",
+                "note": ("No reconstructed segment began at a racket contact, so no shot "
+                         "speed can be reported for this clip."),
+            }
 
     json_path = out / f"summary_{stamp}.json"
     with open(json_path, "w", encoding="utf-8") as f:
@@ -322,7 +366,18 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                     {
                         "start_frame": t.start_frame,
                         "end_frame": t.end_frame,
-                        "speed_kmh": round(t.speed_kmh, 1),
+                        # Omitted, not zeroed, when the segment is not a shot speed.
+                        # A consumer reading speed_kmh must not have to know which
+                        # statuses make it meaningful.
+                        "speed_kmh": (
+                            round(t.speed_kmh, 1)
+                            if getattr(t, "speed_status", VALID)
+                            in (VALID, PLAUSIBLE_BUT_UNCERTAIN)
+                            else None
+                        ),
+                        "speed_status": getattr(t, "speed_status", VALID),
+                        "speed_status_reason": getattr(t, "speed_status_reason", ""),
+                        "duration_s": round(t.duration_s, 3),
                         "apex_height_m": round(t.apex_height_m, 2),
                         "points": [[round(c, 3) for c in p] for p in t.points],
                     }
@@ -566,6 +621,14 @@ def main():
                     "labelling described a sequence tennis does not permit:")
         for note in decode_notes:
             logger.info(f"    {note}")
+    decode_diagnostics = getattr(decode_notes, "diagnostics", {}) or {}
+    # The decoder's own docstring warns that repeatedly overruling a CONFIDENT classifier
+    # means the candidate that forced the repair was probably never an event, or the
+    # classifier is wrong on this footage. That warning fires on the reference clip (the
+    # grammar overrules at 90% and 94%) and used to reach nobody, because it lived only
+    # in a debug string. Raised to a warning and carried into summary.json.
+    if decode_diagnostics.get("warning"):
+        logger.warning(f"  {decode_diagnostics['warning']}")
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
     # bounce) is a valid homography anchor - the floor transform is correct at floor
@@ -735,6 +798,18 @@ def main():
                 if candidate.available:
                     pose_estimator = candidate
                     logger.info("  Pose backend: SAM 3D Body")
+                else:
+                    # Requested and unavailable. Falling through to MediaPipe here was
+                    # silent, and the two backends are measurably different: on identical
+                    # clips MediaPipe scores 85.5% balanced against SAM 3D's 66.4%, so a
+                    # run that quietly used the other one is not the run that was asked
+                    # for. Same class of defect as the homography fallback.
+                    logger.warning(
+                        "  use_sam3d_pose is on but the SAM 3D Body weights are not "
+                        "available, so MediaPipe is being used instead. Fetch them with "
+                        "python scripts/download_sam3d_body.py, or set "
+                        "pipeline.use_sam3d_pose: false to stop asking."
+                    )
 
             if pose_estimator is None:
                 pose_estimator = PoseEstimator(
@@ -1177,8 +1252,28 @@ def main():
                              f"{'serve' if is_serve_flight else 'groundstroke'} bound "
                              f"of {limit:.0f} km/h")
                 continue
+            # Physically admissible. Now say what KIND of measurement it is, which the
+            # gates above do not answer: a post-bounce leg is a real reconstruction and
+            # not a shot, and a short flight is a real speed that this pipeline's own
+            # event-timing error moves by 20% or more.
+            status, reason = classify_segment_speed(
+                starts_at_contact=t.start_frame not in bounce_set,
+                ends_at_bounce=t.end_frame in bounce_set,
+                crosses_the_net=crosses_net(t.start[:2], t.end[:2], net_y_court_m),
+                duration_s=t.duration_s,
+            )
+            t.speed_status = status
+            t.speed_status_reason = reason
+            if status in (OUTLIER, NOT_A_SHOT):
+                logger.debug(f"    f{t.start_frame}->f{t.end_frame} "
+                             f"{t.speed_kmh:.0f} km/h: {status} ({reason})")
             kept.append(t)
         trajectories_3d = kept
+
+        statuses = Counter(t.speed_status for t in trajectories_3d)
+        if statuses:
+            logger.info("  3-D speed validity: "
+                        + ", ".join(f"{n} {s}" for s, n in sorted(statuses.items())))
 
     # Self-audit: what does the detected event sequence PROVE is missing, on this clip?
     # Every other number in this pipeline comes from a labelled dataset and describes
@@ -1196,11 +1291,22 @@ def main():
         logger.info(f"    ... and {len(rally.findings) - 5} more")
 
     if trajectories_3d:
-        speeds_3d = [t.speed_kmh for t in trajectories_3d]
-        logger.info(f"  3-D reconstruction: {len(trajectories_3d)} flight segments | "
-                    f"speed {min(speeds_3d):.0f}-{max(speeds_3d):.0f} km/h "
-                    f"(mean {sum(speeds_3d) / len(speeds_3d):.0f}) | "
-                    f"apex {max(t.apex_height_m for t in trajectories_3d):.1f} m")
+        # Quote the range over SHOT segments only, matching summary.json. Reporting the
+        # range across every segment put an 18 km/h post-bounce leg in the same sentence
+        # as a 170 km/h drive and called both "speed", which is the contradiction the
+        # validity classification exists to remove.
+        shot_segments = [t for t in trajectories_3d
+                         if t.speed_status in (VALID, PLAUSIBLE_BUT_UNCERTAIN)]
+        if shot_segments:
+            speeds_3d = [t.speed_kmh for t in shot_segments]
+            logger.info(f"  3-D reconstruction: {len(trajectories_3d)} flight segments, "
+                        f"{len(shot_segments)} of them shots | shot speed "
+                        f"{min(speeds_3d):.0f}-{max(speeds_3d):.0f} km/h "
+                        f"(mean {sum(speeds_3d) / len(speeds_3d):.0f}) | "
+                        f"apex {max(t.apex_height_m for t in trajectories_3d):.1f} m")
+        else:
+            logger.info(f"  3-D reconstruction: {len(trajectories_3d)} flight segments, "
+                        f"none of them a shot, so no shot speed is reported")
     elif not court_valid:
         # Same refuse-don't-guess rule as serve speed: a reconstruction on an invalid
         # court fit would be confidently wrong, so none is attempted.
@@ -1248,7 +1354,8 @@ def main():
                        f"those frames are approximate."
                    )} if use_hom and approx_frames else {}),
                },
-               fps_support=fps_support.as_dict())
+               fps_support=fps_support.as_dict(),
+               rally_decoding=decode_diagnostics or None)
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")

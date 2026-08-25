@@ -132,8 +132,10 @@ export SAM3D_BODY_CODE=/path/to/sam-3d-body
 #    configs/config.yaml -> pipeline.use_sam3d_pose: true
 ```
 
-Off by default, and the pipeline falls back to MediaPipe silently when the weights are
-absent.
+Off by default. If it is switched on and the weights are absent the pipeline uses
+MediaPipe and says so, rather than falling through in silence: the two backends measure
+85.5% and 66.4% balanced on identical clips, so a run that quietly used the other one is
+not the run that was asked for.
 
 **On licensing.** The weights are under Meta's SAM License, not MIT. That licence grants
 free use, modification and derivative works, and requires anyone *redistributing* the
@@ -328,7 +330,7 @@ and on precision they disagree with this clip.
 
 ### Test suite
 
-**244 unit and integration tests** (`pytest tests/`), covering ball-state classification,
+**350 unit and integration tests** (`pytest tests/`), covering ball-state classification,
 Kalman and RTS smoothing including the physical speed-plausibility gate, mini-court
 coordinate mapping, trajectory drawing, pose-based shot classification, the hit and bounce
 classifier and its feature contract, the rally grammar and its decoder, the no-ground-truth
@@ -424,9 +426,33 @@ recognised.
 
 **Wrong or unvalidated today:**
 
-- **Rally and groundstroke speeds are unvalidated.** 3-D reconstruction produces 29 to 112
-  km/h with a mean of 67, and the physics is verified, but no ground truth exists for
-  non-serve shots. Serve speed is validated; rally speed is not.
+- **Rally and groundstroke speeds are unvalidated.** 3-D reconstruction produces 62 to
+  153 km/h with a mean of 92 on the reference clip, and the physics is verified, but no
+  ground truth exists for non-serve shots. Serve speed is validated; rally speed is not.
+
+  The dominant uncertainty is not the one you would expect. `trajectory_3d.py` used to
+  list drag, spin and contact height as its honest limits, and all three are smaller than
+  event timing, which the list omitted. Speed is distance over flight time, flight time
+  comes from event frames, and the measured mean event offset is 2.4 frames:
+
+  | source of error | mean | median | worst |
+  |---|---|---|---|
+  | **event timing (±2.4 frames)** | **12.5%** | 12.2% | 28.0% |
+  | contact height (±0.20 m) | 0.7% | 0.2% | 3.5% |
+  | ball localization (±0.09 m) | 0.1% | 0.1% | 0.7% |
+
+  Measured on 25 real segments by `eval/speed_timing_sensitivity.py`. Sensitivity scales
+  as 1/T, so flights under 0.5 s average 23.9% and flights over 1.0 s average 6.5%. A
+  reconstructed speed is about as accurate as the event detector is punctual, which is
+  why adding drag or Magnus terms would be modelling the small terms first.
+
+- **Not every reconstructed segment is a shot, and the report says which.** A rally
+  alternates contact, bounce, contact, so only a segment that begins at a racket contact
+  is a ball leaving a racket. On the reference clip 25 segments reconstruct, of which 13
+  are shots, 11 are post-bounce legs travelling to the receiver, and 1 is flagged as an
+  outlier (struck and landing on the striker's own side without crossing the net, which
+  breaks the free-flight assumption). Averaging all 25 into one figure is what previously
+  put an 18 km/h reading next to a 170 km/h one and called both "shot speed".
 - **Roughly a quarter to a third of contacts in a rally are missed** (72.0% recall on real
   detections, 95.9% precision). Reported events are overwhelmingly real, so the shot count
   is an under-count rather than noise.
@@ -483,6 +509,54 @@ recognised.
 - **Ground-level cameras fail.** Validated on broadcast and elevated fixed-camera footage
   only. The validity gate flags these rather than reporting wrong numbers.
 - **Doubles and amateur footage are untested.** Every evaluation clip is broadcast singles.
+- **Frame rates outside 23 to 31 fps are not supported.** See below.
+
+## Supported inputs
+
+Every threshold in the event-detection path is counted in **frames**, and the two largest
+weights in the hit/bounce classifier are velocities in **pixels per frame**. None of it is
+normalised by frame rate, so the same tennis sampled at a different rate produces a
+different event set. Every evaluation clip here runs between 23.57 and 29.82 fps and both
+input videos are 30.0, so the entire measured record sits inside one narrow band.
+
+| Frame rate | Status | What to expect |
+|---|---|---|
+| 23 to 31 fps | **Supported** | The range every number on this page was measured on |
+| 18 to 23, 31 to 50 fps | **Partially supported** | Runs, and event counts are wrong in a known direction |
+| below 18 or above 50 fps | **Unsupported** | Event counts should not be treated as measurements |
+
+Measured by resampling the reference clip's ball track and running the real generators and
+the real classifier over it. Events per second is the comparison that means something,
+since the rally contains the same contacts however fast it was sampled:
+
+| fps | events/s | vs 30 fps | contact:bounce |
+|---|---|---|---|
+| 15 | 0.84 | -43% | 10:6 |
+| 18 | 1.05 | -29% | 9:11 |
+| 24 | 1.37 | -7% | 15:11 |
+| **30** | **1.47** | **baseline** | **14:14** |
+| 36 | 1.79 | +21% | 14:20 |
+| 50 | 2.21 | +50% | 15:27 |
+| 60 | 2.42 | +64% | 11:35 |
+
+Two failures in opposite directions. Too slow and real events are never proposed. Too fast
+and the generators fire more often while the per-frame velocities shrink, so the classifier
+calls almost everything a bounce: 11 contacts to 35 bounces on a rally with roughly 14 of
+each. **60 fps is ordinary footage and it is genuinely not supported today.**
+
+One caveat on the method, in the direction that matters: below 30 fps the resampling
+discards information, which is what a slower camera does. Above 30 fps it invents
+intermediate points a real fast camera would have measured independently, and cannot model
+sharper motion or reduced blur. The high-rate rows are a **lower bound** on the disruption,
+not an estimate of it.
+
+The pipeline still analyses an out-of-band clip rather than refusing it, and stamps the
+rendered video, the log and `summary.json` with what it cannot vouch for. Normalising the
+event path to seconds and metres and retraining is the real fix; it is post-launch work,
+because it would invalidate every number above in the process.
+
+Also unsupported: doubles, ground-level cameras, and any clip whose court fit fails the
+validity gate. All three are reported rather than guessed at.
 
 ## Roadmap
 
@@ -531,12 +605,13 @@ Ordered by measured value, not by interest.
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/                                       # 244 tests, needs the weights
-pytest tests/ -m "not slow"                         # 243, what CI runs, no weights
+pytest tests/                                       # 350 tests, needs the weights
+pytest tests/ -m "not slow"                         # 349, what CI runs, no weights
 
 python eval/shot_frame_accuracy.py                  # reference clip, ships with repo
 python eval/speed_accuracy.py                       # reference clip, ships with repo
 python eval/rally_coherence.py                      # any clips, needs no ground truth
+python eval/speed_timing_sensitivity.py             # reads a run's own 3-D output
 
 python eval/ball_localization_accuracy.py --clips 16          # needs dataset
 python eval/event_detection_on_real_detections.py --compare   # needs dataset
@@ -555,7 +630,7 @@ mini_visual_court/    mini-court mapping and trajectory drawing
 models/               small trained weights (committed); large weights fetched by script
 notes/                CV concept write-ups
 scripts/              download_models.py, build_clip_suite.py
-tests/                244 unit and integration tests
+tests/                350 unit and integration tests
 tools/                label_shots.py, keyboard-driven contact and bounce labelling
 trackers/             tracknet_ball_tracker.py, player_tracker.py
 training/             court keypoint and shot classifier training

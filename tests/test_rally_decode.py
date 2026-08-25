@@ -248,3 +248,100 @@ def test_no_events_are_lost_at_any_prior():
         r = decode_rally(events, deletion_prior=prior)
         total = len(r.contacts) + len(r.bounces) + len(r.discarded)
         assert total == len(events), f"prior {prior} lost events: {total} of {len(events)}"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Observability: the decoder's own warning condition must escape the log
+# ─────────────────────────────────────────────────────────────────
+#
+# rally_decode's module docstring says that repeatedly overruling a CONFIDENT classifier
+# means the candidate forcing the repair was probably never an event, or the classifier
+# is wrong on this footage. On the reference clip the grammar overrules at 90% and 94%,
+# so that warning condition genuinely fires. It used to exist only as a debug string, so
+# it reached nobody. These pin it into the machine-readable output.
+
+from utils.rally_decode import HIGH_CONFIDENCE_FLIP
+
+
+def test_diagnostics_report_a_clean_decode():
+    """A sequence the grammar accepts unchanged must not raise a warning."""
+    events = [(10, 0.95, 1), (30, 0.05, None), (50, 0.95, 2)]
+
+    diagnostics = decode_rally(events, deletion_prior=0.0).diagnostics()
+
+    assert diagnostics["relabelled"] == 0
+    assert diagnostics["discarded_as_spurious"] == 0
+    assert diagnostics["relabelled_over_high_confidence"] == 0
+    assert "warning" not in diagnostics
+
+
+def test_a_high_confidence_override_is_counted_and_warned():
+    """
+    Two contacts by the same side in a row is impossible, so the grammar must repair it.
+    Both are asserted at 95%, well above the classifier's own 86.4% held-out accuracy,
+    so whichever one it relabels is an override of a confident call.
+    """
+    events = [(10, 0.95, 1), (30, 0.95, 1)]
+
+    decoded = decode_rally(events, deletion_prior=0.0)
+    diagnostics = decoded.diagnostics()
+
+    assert diagnostics["relabelled"] >= 1
+    assert diagnostics["relabelled_over_high_confidence"] >= 1
+    assert diagnostics["high_confidence_frames"]
+    assert "warning" in diagnostics
+    assert "caution" in diagnostics["warning"].lower()
+
+
+def test_a_low_confidence_override_is_not_warned():
+    """
+    The grammar resolving an uncertain call is the intended behaviour and must not
+    produce a warning, or the warning becomes noise nobody reads.
+    """
+    events = [(10, 0.52, 1), (30, 0.52, 1)]
+
+    diagnostics = decode_rally(events, deletion_prior=0.0).diagnostics()
+
+    assert diagnostics["relabelled"] >= 1
+    assert diagnostics["relabelled_over_high_confidence"] == 0
+    assert "warning" not in diagnostics
+
+
+def test_flip_confidences_are_recorded_for_every_flip():
+    events = [(10, 0.95, 1), (30, 0.95, 1)]
+    decoded = decode_rally(events, deletion_prior=0.0)
+
+    assert len(decoded.flip_confidences) == len(decoded.flips)
+    for frame, confidence in decoded.flip_confidences:
+        assert 0.0 <= confidence <= 1.0
+
+
+def test_high_confidence_threshold_sits_above_the_classifier_accuracy():
+    """
+    The point of the threshold is "surer than it has any right to be". The hit/bounce
+    classifier measures 86.4% held out, so anything below that is not a confident call.
+    """
+    assert HIGH_CONFIDENCE_FLIP >= 0.86
+
+
+def test_diagnostics_are_json_serialisable():
+    import json
+
+    json.dumps(decode_rally([(10, 0.95, 1), (30, 0.95, 1)],
+                            deletion_prior=0.02).diagnostics())
+
+
+def test_derive_shot_frames_notes_carry_diagnostics():
+    """
+    derive_shot_frames returns notes as a list subclass so six existing callers keep
+    unpacking a 4-tuple. If that ever becomes a plain list again, main.py silently stops
+    reporting decoder diagnostics, which is exactly the failure this feature fixes.
+    """
+    from utils.hit_bounce_classifier import DecodeNotes
+
+    notes = DecodeNotes(["a flip"])
+    notes.diagnostics = {"relabelled": 1}
+
+    assert isinstance(notes, list)
+    assert list(notes) == ["a flip"]
+    assert notes.diagnostics["relabelled"] == 1

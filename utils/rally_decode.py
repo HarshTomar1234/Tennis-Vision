@@ -110,6 +110,16 @@ BOUNCE = "bounce"
 NOISE = "noise"
 
 
+# A flip above this classifier confidence is the module docstring's warning condition:
+# the grammar is not resolving an uncertain call, it is overruling a confident one. On
+# the reference clip the decoder overrules at 90% and 94%, which says the candidate that
+# forced the repair is probably spurious, or the classifier is wrong in a way a grammar
+# should not be papering over. Chosen as the point where the classifier is more confident
+# than its own 86.4% held-out accuracy, so "the model is surer than it has any right to
+# be and is still wrong" is the thing being counted.
+HIGH_CONFIDENCE_FLIP = 0.86
+
+
 @dataclass
 class DecodedRally:
     """The relabelled sequence, and what it cost to get there."""
@@ -118,10 +128,46 @@ class DecodedRally:
     bounces: list[int] = field(default_factory=list)
     flips: list[str] = field(default_factory=list)
     discarded: list[int] = field(default_factory=list)
+    # (frame, confidence) for every flip, so a consumer can act on the distribution
+    # rather than re-parse the human-readable strings in `flips`.
+    flip_confidences: list[tuple[int, float]] = field(default_factory=list)
 
     @property
     def events(self) -> int:
         return len(self.contacts) + len(self.bounces)
+
+    @property
+    def high_confidence_flips(self) -> list[tuple[int, float]]:
+        """Flips where the grammar overruled a classifier that was very sure."""
+        return [(f, c) for f, c in self.flip_confidences if c >= HIGH_CONFIDENCE_FLIP]
+
+    def diagnostics(self) -> dict:
+        """
+        Machine-readable account of what decoding did, for summary.json.
+
+        This lived only in the log, which meant the module's own warning condition fired
+        on the reference clip and reached nobody. A consumer cannot audit a rally it
+        cannot see the repairs for.
+        """
+        high = self.high_confidence_flips
+        payload = {
+            "events_kept": self.events,
+            "relabelled": len(self.flips),
+            "discarded_as_spurious": len(self.discarded),
+            "relabelled_over_high_confidence": len(high),
+        }
+        if high:
+            payload["high_confidence_frames"] = [f for f, _ in high]
+            payload["warning"] = (
+                f"The rally grammar overruled the per-event classifier on {len(high)} "
+                f"event(s) where it was at least {HIGH_CONFIDENCE_FLIP:.0%} confident. "
+                f"A grammar repairing an uncertain call is the intended behaviour; "
+                f"repairing confident ones repeatedly means the candidate that forced "
+                f"the repair was probably never an event, or the classifier is wrong on "
+                f"this footage. Treat the event sequence on this clip with more caution "
+                f"than the headline recall figure implies."
+            )
+        return payload
 
     def summary(self) -> str:
         if not self.events:
@@ -244,6 +290,7 @@ def decode_rally(events, deletion_prior: float = 0.0) -> DecodedRally:
         preferred = CONTACT if p_contact >= 0.5 else BOUNCE
         if label != preferred:
             confidence = p_contact if preferred == CONTACT else 1.0 - p_contact
+            result.flip_confidences.append((frame, confidence))
             result.flips.append(
                 f"f{frame}: {preferred} -> {label} "
                 f"(classifier preferred {preferred} at {confidence:.0%}, "
