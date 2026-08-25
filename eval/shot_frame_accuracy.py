@@ -24,8 +24,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import csv
 from _ball_source import pipeline_ball_detections
-from utils import read_video, derive_shot_frames, stub_path_for_video
+from utils import (
+    derive_shot_frames,
+    read_video,
+    select_two_players,
+    stub_path_for_video,
+)
 from trackers import PlayerTracker
+from court_line_detector import CourtLineDetector
 
 # Hand-labeled ground truth for input_video_2.mp4
 # Captured during audit session 2026-05-06 from audit_frames/ analysis
@@ -91,7 +97,14 @@ def evaluate(video_path: str, gt_frames: list[int]) -> dict:
         read_from_stub=True,
         stub_path=stub_path_for_video("tracker_stubs/player_detections.pkl", video_path),
     )
-    detected, bounces, raw = derive_shot_frames(tracker, ball_det, player_det)
+    # Narrow to the two players, exactly as main.py does. Skipping this fed every person
+    # YOLO found (fourteen on this clip, spectators included) into event derivation, so
+    # the eval was grading a strictly worse input than the product ships.
+    court = CourtLineDetector("models/keypoints_model_geoaug.pth")
+    player_det, _id_map = select_two_players(
+        player_tracker, player_det, court.predict(frames[0])
+    )
+    detected, bounces, raw, _flips = derive_shot_frames(tracker, ball_det, player_det)
     print(f"Candidates  : {len(raw)} raw reversals → {len(detected)} shots, {len(bounces)} bounces")
 
     print(f"GT shots    : {len(gt_frames)}")

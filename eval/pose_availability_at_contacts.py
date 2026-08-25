@@ -80,7 +80,7 @@ def analyse(video_path: str, estimator: PoseEstimator) -> dict:
     court = CourtLineDetector("models/keypoints_model_geoaug.pth")
     players = player_tracker.choose_and_filter_players(players, court.predict(frames[0]))
 
-    shots, _bounces, _raw = derive_shot_frames(ball_tracker, interpolated, players)
+    shots, _bounces, _raw, _flips = derive_shot_frames(ball_tracker, interpolated, players)
 
     exact = window = 0
     for frame in shots:

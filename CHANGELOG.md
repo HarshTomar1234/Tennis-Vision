@@ -11,6 +11,60 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Constrained rally decoding** (`utils/rally_decode.py`). The hit/bounce classifier
+  labels each event in isolation, so its errors compound into rallies that cannot happen:
+  the self-audit found one player hitting five times in succession on the reference clip.
+  A rally is a grammar, and the classifier emits probabilities rather than hard labels, so
+  the most likely labelling that obeys the grammar is a Viterbi decode. It relabels events
+  the ordering rules out, and discards candidates that have no legal place at all.
+
+  Measured across the 9 eval clips, events the audit proves are missing fall from 83 to 35
+  at the shipped setting, with contact recall on 40 labelled dataset clips unchanged at
+  75.9%. Ten of ten clips improved and none got worse.
+
+  It cannot recover an event that was never detected, and does not try. The audit metric
+  says the reported rally is coherent, not that every discarded candidate was spurious,
+  which is why it is only ever quoted next to the recall it cost.
+
+- `utils/player_selection.py`, the two-player selection `main.py` was doing inline, now
+  shared so the evals grade the same players the pipeline reports on.
+
+### Fixed
+
+- The rally grammar's same-player rule did not survive an intervening bounce, so
+  `hit(far), bounce, hit(far)` was accepted. That describes a ball that never crossed the
+  net.
+
+- The decoder deleted every event preceding a sequence with no legal continuation, because
+  that branch rebuilt the path from scratch instead of extending it. One clip decoded 22
+  events down to 1. Unreachable at any non-zero deletion prior, since NOISE always supplies
+  a legal continuation, so it only surfaced when the prior was swept to 0.
+
+- `eval/shot_frame_accuracy.py` fed every detected person into event derivation rather
+  than the two players. On the reference clip that is fourteen people, so the ids reaching
+  the decoder included spectators and the eval was grading a strictly worse input than the
+  product ships.
+
+### Measured and rejected
+
+- **Relabelling-only decoding.** The first version could repair an impossible ordering
+  only by flipping a label. It measured worse than not decoding at all: false positives 7
+  to 10, no recall gain. Not a tuning problem. Every repair pushes an event into the other
+  class, which is only correct when each candidate is a real event, and on this clip 41%
+  of them are. Fixed by letting the grammar discard a candidate as well as relabel it.
+
+- **A deletion prior above 0.02.** Chosen as 0.15 at first, from a flat region on the
+  labelled reference clip. The 40-clip recall curve showed that clip saturates early and
+  the flatness was an artefact: recall falls monotonically with the prior, so 0.15 was
+  giving up 2.6 points of recall (75.9% to 73.3%) for no additional coherence. At 0.50
+  every candidate decodes to noise and recall reaches zero.
+
+---
+
 ## [2.0.0] - 2026-08-18
 
 147 commits. Not a feature release: V1 already produced numbers, and this release is about

@@ -45,8 +45,10 @@ from utils import (
     merge_nearby_candidates,
     peak_speed_kmh_near_frame,
     read_video,
+    select_two_players,
     save_video,
     smooth_trajectories,
+    striking_side,
     stub_matches_frames,
     stub_path_for_video,
 )
@@ -483,24 +485,12 @@ def main():
 
     # ── 5. Player selection ────────────────────────────────────────
     logger.info("[5/9] Filtering to 2 main players...")
-    player_detections = player_tracker.choose_and_filter_players(
-        player_detections, court_keypoints
+    # Shared with the evals (utils.player_selection) so they grade the same two players
+    # the pipeline reports on, rather than every person YOLO found in the stands.
+    player_detections, player_id_map = select_two_players(
+        player_tracker, player_detections, court_keypoints
     )
-
-    # Build the id map from every frame, not frame 0: selection already narrowed
-    # this to the chosen players, but a player can be absent from the opening
-    # frame (replay wipe, off-screen at serve) and reading only frame 0 would
-    # silently drop them from the whole run.
-    chosen_ids = sorted({track_id for frame in player_detections for track_id in frame})
-    player_id_map = {orig: new for new, orig in enumerate(chosen_ids[:2], start=1)}
     logger.info(f"  Player ID mapping: {player_id_map}")
-
-    normalized: list[dict] = []
-    for frame in player_detections:
-        normalized.append(
-            {player_id_map[k]: v for k, v in frame.items() if k in player_id_map}
-        )
-    player_detections = normalized
 
     # ── 6. Mini-court setup ────────────────────────────────────────
     logger.info("[6/9] Building mini-court visualization...")
@@ -523,9 +513,15 @@ def main():
     # logic rather than a re-implementation of it. See that function for why three
     # generators are needed and what each one is blind to.
     shot_dist_px = cfg.get("detection", {}).get("shot_player_distance_px", 300)
-    confirmed_shot_frames, bounce_frames, raw_reversal_frames = derive_shot_frames(
+    (confirmed_shot_frames, bounce_frames,
+     raw_reversal_frames, decode_notes) = derive_shot_frames(
         ball_tracker, ball_detections, player_detections, shot_dist_px
     )
+    if decode_notes:
+        logger.info("  Rally grammar overruled the per-event classifier where its "
+                    "labelling described a sequence tennis does not permit:")
+        for note in decode_notes:
+            logger.info(f"    {note}")
 
     # Floor-level anchors for BALL GEOMETRY: every trajectory reversal (contact or
     # bounce) is a valid homography anchor - the floor transform is correct at floor
@@ -1003,29 +999,14 @@ def main():
                 bbox = ball_detections[frame].get(1) if frame < len(ball_detections) else None
                 if not players or bbox is None:
                     continue
-                # Nearest player in BOTH axes, measured to the player's box rather than
-                # to its centre.
-                #
-                # This compared horizontal distance only, and in a broadcast view both
-                # players sit near the centre line in x while being metres apart in y, so
-                # the comparison was close to meaningless: it attributed nearly every
-                # contact to the same player. The rally self-audit caught it, reporting
-                # one player hitting five times in succession, which is impossible in
-                # singles.
-                #
-                # Distance to the box, not to its centre, because a near player's box is
-                # tall: a ball at their feet is far from the box centre while being right
-                # on the player.
-                ball_x = (bbox[0] + bbox[2]) / 2.0
-                ball_y = (bbox[1] + bbox[3]) / 2.0
-
-                def _box_distance(pid):
-                    bx1, by1, bx2, by2 = players[pid]
-                    dx = max(bx1 - ball_x, 0.0, ball_x - bx2)
-                    dy = max(by1 - ball_y, 0.0, ball_y - by2)
-                    return (dx * dx + dy * dy) ** 0.5
-
-                hitter = min(players, key=_box_distance)
+                # Same attribution the rally grammar uses (utils.hit_bounce_classifier),
+                # rather than a second copy of the rule: two implementations of "who hit
+                # it" can disagree, and the audit would then be checking a different
+                # answer from the one drawn. Unbounded here because a contact has to be
+                # placed somewhere, while the grammar prefers None over a wrong guess.
+                hitter = striking_side(frame, ball_detections, player_detections)
+                if hitter is None:
+                    continue
                 px1, _, px2, py2 = players[hitter]
                 point = ((px1 + px2) / 2.0, float(py2))
                 hitter_by_frame[frame] = hitter

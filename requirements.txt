@@ -25,5 +25,14 @@ mediapipe>=1.0.0
 huggingface-hub>=0.20.0
 gdown>=4.7.1
 
+# Broadcast transfer test only (eval/validate_on_broadcast_images.py).
+# Note: roboflow pulls in opencv-python-headless, which has no GUI functions and
+# silently overwrites the opencv-python/opencv-contrib-python build above, whichever
+# was installed last. tools/label_shots.py then fails with "namedWindow ... not
+# implemented" even though `import cv2` itself works fine. If that happens:
+#   pip uninstall opencv-python-headless -y
+#   pip install --force-reinstall --no-deps opencv-contrib-python
+roboflow>=1.1.0
+
 # Testing
 pytest>=7.0.0

@@ -63,6 +63,10 @@ external/
 # datasets/labels/ (our own hand labels, small CSVs) is intentionally NOT ignored.
 datasets/external/
 
+# tools/frame_strip.py output: throwaway contact-sheet images for reviewing a labelling
+# gap by eye. Not a deliverable, and not needed once the CSV they helped produce is done.
+datasets/labels/_review/
+
 # Evaluation footage: large binaries, and third-party broadcast material we only
 # hold locally for testing. The manifests and the eval scripts are the reproducible
 # part and are tracked; the video is not redistributed through this repo.

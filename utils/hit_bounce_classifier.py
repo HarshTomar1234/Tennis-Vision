@@ -308,6 +308,38 @@ def merge_nearby_candidates(candidates: list[int], min_gap: int = 10) -> list[in
     return [cluster[len(cluster) // 2] for cluster in clusters]
 
 
+def event_contact_probabilities(
+    reversal_frames: list[int],
+    ball_detections: list[dict],
+    weights_path: str = DEFAULT_WEIGHTS_PATH,
+) -> dict[int, float]:
+    """
+    P(contact) per candidate frame, for frames the trajectory model can decide on.
+
+    Split out of classify_reversals_by_trajectory because constrained decoding
+    (utils.rally_decode) needs the probability, not the hard label: a grammar can only
+    overrule a classifier if it knows how strongly the classifier objects. Frames with
+    no usable trajectory context are absent from the result rather than defaulted.
+    """
+    positions: list[tuple[float, float] | None] = []
+    for det in ball_detections:
+        bbox = det.get(1)
+        if bbox is not None:
+            positions.append(((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0))
+        else:
+            positions.append(None)
+
+    probabilities: dict[int, float] = {}
+    for frame in reversal_frames:
+        result = classify_hit_or_bounce(compute_event_features(positions, frame),
+                                        weights_path)
+        if result is None:
+            continue
+        label, confidence = result
+        probabilities[frame] = confidence if label == CONTACT else 1.0 - confidence
+    return probabilities
+
+
 def classify_reversals_by_trajectory(
     reversal_frames: list[int],
     ball_detections: list[dict],
@@ -324,23 +356,66 @@ def classify_reversals_by_trajectory(
     Frames where the classifier can't reach a decision (not enough trajectory context,
     or the weights aren't trained) are dropped from both lists rather than guessed.
     """
-    positions: list[tuple[float, float] | None] = []
-    for det in ball_detections:
-        bbox = det.get(1)
-        if bbox is not None:
-            positions.append(((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0))
-        else:
-            positions.append(None)
+    probabilities = event_contact_probabilities(
+        reversal_frames, ball_detections, weights_path
+    )
 
     contacts, bounces = [], []
     for frame in reversal_frames:
-        features = compute_event_features(positions, frame)
-        result = classify_hit_or_bounce(features, weights_path)
-        if result is None:
+        p_contact = probabilities.get(frame)
+        if p_contact is None:
             continue
-        (contacts if result[0] == CONTACT else bounces).append(frame)
+        (contacts if p_contact >= 0.5 else bounces).append(frame)
 
     return contacts, bounces
+
+
+# The proximity contact/bounce fallback measured about 5 correct in 7 on our own footage
+# (see the module docstring), so that is the confidence it carries into decoding. It is a
+# weak vote by design: the grammar should be able to overrule it, unlike a calibrated
+# trajectory probability.
+PROXIMITY_RELIABILITY = 5.0 / 7.0
+
+
+def striking_side(
+    frame: int,
+    ball_detections: list[dict],
+    player_detections: list[dict],
+    max_distance_px: float = float("inf"),
+) -> int | None:
+    """
+    Which player was nearest the ball at this frame, or None if it cannot be said.
+
+    Distance is measured to the player's box rather than to its centre, because a near
+    player's box is tall: a ball at their feet is far from the box centre while being
+    right on the player. It also uses BOTH axes. Comparing horizontal distance alone is
+    close to meaningless in a broadcast view, where both players sit near the centre line
+    in x while being metres apart in y, and it attributed nearly every contact to the same
+    player until the rally self-audit caught it.
+
+    Args:
+        max_distance_px: beyond this, return None rather than name a player. The rally
+            grammar needs that, because a wrong side makes it reject a real contact. Leave
+            unbounded when a nearest player is wanted regardless of distance, as when
+            placing a contact on the mini-court.
+    """
+    if frame >= len(ball_detections) or frame >= len(player_detections):
+        return None
+    bbox = ball_detections[frame].get(1)
+    players = player_detections[frame]
+    if bbox is None or not players:
+        return None
+
+    ball_x, ball_y = (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
+
+    def box_distance(pid):
+        x1, y1, x2, y2 = players[pid]
+        dx = max(x1 - ball_x, 0.0, ball_x - x2)
+        dy = max(y1 - ball_y, 0.0, ball_y - y2)
+        return (dx * dx + dy * dy) ** 0.5
+
+    nearest = min(players, key=box_distance)
+    return nearest if box_distance(nearest) <= max_distance_px else None
 
 
 def derive_shot_frames(
@@ -348,6 +423,7 @@ def derive_shot_frames(
     ball_detections: list[dict],
     player_detections: list[dict],
     shot_player_distance_px: int = 300,
+    deletion_prior: float | None = None,
 ):
     """
     Turn ball detections into the pipeline's confirmed shot and bounce frames.
@@ -371,12 +447,19 @@ def derive_shot_frames(
         ball_detections:          per-frame {ball_id: bbox}, already interpolated.
         player_detections:        per-frame {player_id: bbox}, for the proximity fallback.
         shot_player_distance_px:  proximity threshold for the fallback classifier.
+        deletion_prior:           how readily rally decoding may discard a candidate as
+                                  spurious. Defaults to the swept value in
+                                  utils.rally_decode; pass 0.0 to disable discarding.
 
     Returns:
-        (shot_frames, bounce_frames, raw_reversal_frames), each sorted.
+        (shot_frames, bounce_frames, raw_reversal_frames, decode_flips). The first three
+        are sorted frame lists; `decode_flips` describes every label the rally grammar
+        overruled (see utils.rally_decode), and is empty when the classifier's own
+        labelling was already a physically possible rally.
     """
     from .ball_state import classify_contact_vs_bounce
     from .bounce_candidates import detect_bounce_candidates
+    from .rally_decode import MEASURED_DELETION_PRIOR, decode_rally
 
     raw_reversals = merge_nearby_candidates(sorted(
         set(ball_tracker.get_ball_shot_frames(ball_detections))
@@ -384,14 +467,14 @@ def derive_shot_frames(
         | set(detect_bounce_candidates(ball_detections))
     ))
 
-    traj_contacts, traj_bounces = classify_reversals_by_trajectory(
-        raw_reversals, ball_detections
-    )
-    classified = set(traj_contacts) | set(traj_bounces)
+    # Probabilities rather than labels, because decoding below needs to know how strongly
+    # the classifier holds each opinion, not just which way it leans. Computed once and
+    # used for both the fallback split and the decode.
+    probabilities = event_contact_probabilities(raw_reversals, ball_detections)
 
     # Reversals the trajectory model cannot decide on (too little context, e.g. near a
     # clip boundary) fall back to player proximity rather than being silently dropped.
-    unclassified = [f for f in raw_reversals if f not in classified]
+    unclassified = [f for f in raw_reversals if f not in probabilities]
     if unclassified:
         prox_contacts, prox_bounces = classify_contact_vs_bounce(
             unclassified, ball_detections, player_detections,
@@ -400,6 +483,36 @@ def derive_shot_frames(
     else:
         prox_contacts, prox_bounces = [], []
 
-    return (sorted(traj_contacts + prox_contacts),
-            sorted(traj_bounces + prox_bounces),
-            raw_reversals)
+    # Constrained decoding. Each event above was labelled in isolation, which is why the
+    # sequence can come out physically impossible (one player hitting twice with no reply
+    # in between). Re-label the sequence as a whole, keeping the most likely labelling
+    # that a rally permits. This cannot recover an event that was never detected.
+    proximity_labels = {f: True for f in prox_contacts}
+    proximity_labels.update({f: False for f in prox_bounces})
+
+    events = []
+    for frame in raw_reversals:
+        p_contact = probabilities.get(frame)
+        if p_contact is None:
+            if frame not in proximity_labels:
+                continue
+            # The proximity fallback has no calibrated probability, so it enters decoding
+            # at its measured reliability rather than as a certainty.
+            p_contact = (PROXIMITY_RELIABILITY if proximity_labels[frame]
+                         else 1.0 - PROXIMITY_RELIABILITY)
+        side = striking_side(frame, ball_detections, player_detections,
+                             shot_player_distance_px)
+        events.append((frame, p_contact, side))
+
+    if deletion_prior is None:
+        deletion_prior = MEASURED_DELETION_PRIOR
+    decoded = decode_rally(events, deletion_prior=deletion_prior)
+
+    notes = list(decoded.flips)
+    if decoded.discarded:
+        notes.append(
+            f"{len(decoded.discarded)} candidate(s) discarded as spurious at frames "
+            f"{decoded.discarded}: no legal place in the rally, and dropping them was a "
+            f"better explanation than promoting them"
+        )
+    return decoded.contacts, decoded.bounces, raw_reversals, notes

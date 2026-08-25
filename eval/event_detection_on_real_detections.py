@@ -115,7 +115,7 @@ def run(n_clips: int, max_frames: int, largest_blob: bool) -> dict:
         interpolated = tracker.interpolate_ball_positions(detections)
         # No player detections: the proximity fallback stays inert and the trajectory
         # classifier alone decides, which is what this measures.
-        shots, bounces, _raw = derive_shot_frames(tracker, interpolated, [{}] * len(frames))
+        shots, bounces, _raw, _flips = derive_shot_frames(tracker, interpolated, [{}] * len(frames))
         events = sorted(set(shots) | set(bounces))
 
         m, mi, fp = score(events, contacts)

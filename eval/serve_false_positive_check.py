@@ -49,7 +49,13 @@ from court_line_detector import CourtLineDetector
 from mini_visual_court import MiniCourt
 from trackers import PlayerTracker
 from trackers.tracknet_ball_tracker import TrackNetBallTracker
-from utils import assess_court_fit, derive_shot_frames, read_video, stub_path_for_video
+from utils import (
+    assess_court_fit,
+    derive_shot_frames,
+    read_video,
+    select_two_players,
+    stub_path_for_video,
+)
 from utils.serve_detector import is_serve
 
 DEFAULT_GLOB = "datasets/eval_clips/*.mp4"
@@ -81,7 +87,12 @@ def analyse(video_path: str) -> dict:
     keypoints = all_keypoints[0]
     court_ok, support = assess_court_fit(frames, all_keypoints)
 
-    shots, _bounces, _raw = derive_shot_frames(ball_tracker, interpolated, players)
+    # Two players only, as main.py does. Passing every detected person let spectator
+    # track ids reach event derivation, where they corrupt the rally grammar's
+    # same-player rule.
+    players, _id_map = select_two_players(player_tracker, players, keypoints)
+
+    shots, _bounces, _raw, _notes = derive_shot_frames(ball_tracker, interpolated, players)
 
     mini_court = MiniCourt(frames[0])
     if court_ok:

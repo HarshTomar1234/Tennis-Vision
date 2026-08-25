@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 
-from utils import read_video
+from utils import read_video, stub_path_for_video
 
 SHOT_TYPES = {
     ord("1"): "serve",
@@ -163,20 +163,30 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Label tennis contact frames and shot types")
     ap.add_argument("--video", default="input_videos/input_video_2.mp4")
     ap.add_argument("--out",   default=None, help="CSV path (default: datasets/labels/<clip>.csv)")
-    ap.add_argument("--ball-stub",   default="tracker_stubs/ball_detections_tracknet.pkl")
-    ap.add_argument("--player-stub", default="tracker_stubs/player_detections.pkl")
+    ap.add_argument("--ball-stub",   default=None,
+                     help="default: tracker_stubs/ball_detections_tracknet.pkl, keyed to --video")
+    ap.add_argument("--player-stub", default=None,
+                     help="default: tracker_stubs/player_detections.pkl, keyed to --video")
     args = ap.parse_args()
 
     clip_name = Path(args.video).stem
     out_path  = args.out or f"datasets/labels/{clip_name}.csv"
 
+    # Keyed per clip, same convention as every eval script (utils.stub_path_for_video).
+    # Unkeyed defaults here previously loaded whichever clip's cache happened to be at
+    # the unversioned path, seeding candidates from the wrong video's detections.
+    ball_stub = args.ball_stub or stub_path_for_video(
+        "tracker_stubs/ball_detections_tracknet.pkl", args.video)
+    player_stub = args.player_stub or stub_path_for_video(
+        "tracker_stubs/player_detections.pkl", args.video)
+
     print(f"Loading {args.video} ...")
     frames = read_video(args.video)
     total  = len(frames)
 
-    ball_dets   = load_detections(args.ball_stub)
-    player_dets = load_detections(args.player_stub)
-    candidates  = set(load_candidates(args.ball_stub))
+    ball_dets   = load_detections(ball_stub)
+    player_dets = load_detections(player_stub)
+    candidates  = set(load_candidates(ball_stub))
     labels      = load_existing_labels(out_path)
 
     print(f"  {total} frames | {len(candidates)} detector candidates | "

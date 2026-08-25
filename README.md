@@ -280,6 +280,37 @@ self-generated reference.
 Mean ratio 0.96, always at or below radar, which is what aerodynamic drag predicts given
 that radar reads at racket contact. Reproduce with `eval/serve_speed_accuracy.py`.
 
+### Rally coherence
+
+A rally has orderings that cannot happen: a player cannot hit twice in succession, and a
+ball cannot bounce twice with play continuing. Where the reported sequence contains one,
+an event is provably missing, and that is checkable with no ground truth at all. So this
+is measured on every clip rather than only the labelled one.
+
+The hit/bounce classifier labels each event alone, so its errors compound into impossible
+rallies. `utils/rally_decode.py` re-labels the sequence as a whole, keeping the most likely
+labelling the rules permit, and discarding candidates that have no legal place in it.
+
+| Metric | Without decoding | With decoding | Script |
+|---|---|---|---|
+| Events the ordering proves are missing (9 clips) | 83 | **35** | `eval/rally_coherence.py` |
+| Clips improved | | 10 of 10, none worse | same |
+| Contact recall, 40 labelled clips | 75.9% | **75.9%** | `eval/event_detection_on_real_detections.py` |
+| Shot recall on the labelled clip | 100% | 100% | `eval/shot_frame_accuracy.py` |
+| Shot false positives on the labelled clip | 7 | 8 | same |
+
+The coherence number alone would be trivially gamed by discarding every candidate, so it is
+only quoted next to the recall it cost. Discarding does cost recall as it gets more
+aggressive, monotonically, which is why the shipped setting is the smallest one that gets
+the full coherence benefit rather than the one with the best coherence score.
+
+What it costs: one extra false-positive shot on the reference clip. That clip has 7 labelled
+shots, so a single event is inside its noise, and the dataset-scale recall it is traded
+against is unchanged. The cost is listed rather than left out.
+
+It cannot recover an event that was never detected: a missing contact stays missing, and
+the audit still reports it.
+
 ### Reference clip, end to end
 
 One clip with 7 hand-labelled shots. Listed because it is the reproducible demo, not
@@ -288,17 +319,18 @@ and on precision they disagree with this clip.
 
 | Metric | Result | Script |
 |---|---|---|
-| Shot-frame recall | 7/7 found, mean offset 7.4 frames | `eval/shot_frame_accuracy.py` |
-| Shot-frame precision | 58.3%, 5 false positives in 12 reported, F1 0.74 | same |
+| Shot-frame recall | 7/7 found, mean offset 7.9 frames | `eval/shot_frame_accuracy.py` |
+| Shot-frame precision | 46.7%, 8 false positives in 15 reported, F1 0.636 | same |
 | Ball speed plausibility (a range check, **not** accuracy) | 21/21 within physical bounds | `eval/speed_accuracy.py` |
 
 ### Test suite
 
-**204 unit and integration tests** (`pytest tests/`), covering ball-state classification,
+**244 unit and integration tests** (`pytest tests/`), covering ball-state classification,
 Kalman and RTS smoothing including the physical speed-plausibility gate, mini-court
 coordinate mapping, trajectory drawing, pose-based shot classification, the hit and bounce
-classifier and its feature contract, TrackNet postprocessing geometry, detection-cache
-keying, and packaging integrity.
+classifier and its feature contract, the rally grammar and its decoder, the no-ground-truth
+rally audit, TrackNet postprocessing geometry, detection-cache keying, and packaging
+integrity.
 
 The end-to-end smoke test runs genuine fresh detection and depends on no cached artefacts,
 so it fails for everyone if the pipeline breaks.
@@ -496,10 +528,11 @@ Ordered by measured value, not by interest.
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/                                       # 204 tests
+pytest tests/                                       # 244 tests
 
 python eval/shot_frame_accuracy.py                  # reference clip, ships with repo
 python eval/speed_accuracy.py                       # reference clip, ships with repo
+python eval/rally_coherence.py                      # any clips, needs no ground truth
 
 python eval/ball_localization_accuracy.py --clips 16          # needs dataset
 python eval/event_detection_on_real_detections.py --compare   # needs dataset
@@ -518,7 +551,7 @@ mini_visual_court/    mini-court mapping and trajectory drawing
 models/               small trained weights (committed); large weights fetched by script
 notes/                CV concept write-ups
 scripts/              download_models.py, build_clip_suite.py
-tests/                204 unit and integration tests
+tests/                244 unit and integration tests
 tools/                label_shots.py, keyboard-driven contact and bounce labelling
 trackers/             tracknet_ball_tracker.py, player_tracker.py
 training/             court keypoint and shot classifier training
