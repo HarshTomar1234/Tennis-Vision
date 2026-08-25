@@ -92,10 +92,31 @@ class MiniCourt:
             self.buffer                   = max(25, int(min(self.frame_width, self.frame_height) * 0.035))
             self._use_layout_position     = False
 
+        # Frames where a homography was asked for and could not be fitted, so the
+        # nearest-keypoint approximation was used instead. Recorded because that
+        # substitution used to happen in silence: the README calls the approximation the
+        # old, wrong method, and nothing in the log, the summary JSON or the HUD said it
+        # had been used. A run that quietly degrades to a materially different algorithm
+        # is the failure mode this project exists to refuse.
+        #
+        # Only populated when use_homography=True. Running with it off is a deliberate
+        # configuration choice, already reported by main.py, and not a fallback.
+        self.homography_failed_frames: set[int] = set()
+
+        # Positions that could not be mapped at all. Previously these became the CENTRE
+        # OF THE COURT, a fabricated coordinate that then flowed into player distance
+        # and speed. Now they are omitted and counted here.
+        self.unmappable_positions: int = 0
+
         self._set_canvas_position(frame)
         self._set_court_position()
         self._set_drawing_keypoints()
         self._set_court_lines()
+
+    @property
+    def calibration_is_approximate(self) -> bool:
+        """Whether any position in the last conversion came from the fallback mapping."""
+        return bool(self.homography_failed_frames)
 
     # ── Private init helpers ──────────────────────────────────────────────────
 
@@ -313,6 +334,11 @@ class MiniCourt:
                 if key not in _h_cache:
                     _h_cache[key] = self.compute_homography(kp)
                 H = _h_cache[key]
+                if H is None:
+                    # Asked for, could not be fitted. The nearest-keypoint fallback
+                    # below is a different and less accurate algorithm, so record that
+                    # it was used rather than letting the substitution pass unnoticed.
+                    self.homography_failed_frames.add(frame_num)
 
             # ── Players: foot position = bottom-centre of bounding box ────────
             for pid, bbox in player_boxes[frame_num].items():
@@ -327,10 +353,12 @@ class MiniCourt:
                         float(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
                     )
                 except (ValueError, TypeError, IndexError):
-                    out_players[frame_num][pid] = (
-                        self.start_x + self.mini_court_width  // 2,
-                        self.start_y + self.mini_court_height // 2,
-                    )
+                    # Omitted, not defaulted. This used to place the player at the
+                    # CENTRE OF THE COURT, which is not a degraded measurement but an
+                    # invented one: it then flowed into distance covered and player
+                    # speed as though it had been observed. A missing position is
+                    # missing, and every consumer here already handles an absent id.
+                    self.unmappable_positions += 1
 
             # ── Ball: centre of bounding box ──────────────────────────────────
             for bid, bbox in (ball_boxes[frame_num] if frame_num < len(ball_boxes) else {}).items():
@@ -346,10 +374,9 @@ class MiniCourt:
                         int(np.clip(my, self.playing_area_start_y, self.playing_area_end_y)),
                     )
                 except (ValueError, TypeError, IndexError):
-                    out_ball[frame_num][bid] = (
-                        self.start_x + self.mini_court_width  // 2,
-                        self.start_y + self.mini_court_height // 2,
-                    )
+                    # Same reasoning as the players above: a ball that cannot be mapped
+                    # is absent, not at the centre of the court.
+                    self.unmappable_positions += 1
 
         return out_players, out_ball
 
@@ -415,6 +442,8 @@ class MiniCourt:
                 if key not in _h_cache:
                     _h_cache[key] = self.compute_homography(kp)
                 H = _h_cache[key]
+                if H is None:
+                    self.homography_failed_frames.add(frame_num)
 
             try:
                 mx, my = self.apply_homography(H, (bx, by)) if H is not None \

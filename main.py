@@ -241,7 +241,8 @@ def setup_logging(cfg: dict) -> logging.Logger:
 def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                court_fit: tuple[bool, float] | None = None,
                serve_speed_kmh: float = 0.0,
-               trajectories_3d: list | None = None):
+               trajectories_3d: list | None = None,
+               calibration: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -281,6 +282,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                 "positions are derived from an unreliable court and should not be "
                 "treated as measurements."
             )
+    if calibration:
+        # How the coordinates in this run were actually produced. A consumer cannot tell
+        # a homography-mapped position from a nearest-keypoint approximation by looking
+        # at it, so the distinction has to be stated rather than inferred.
+        summary["calibration"] = calibration
     if trajectories_3d:
         # Speeds here include the vertical component the floor projection discards, so
         # they are not comparable with avg_shot_speed_*_kmh above and are named apart.
@@ -563,6 +569,25 @@ def main():
         ball_detections, all_court_keypoints, floor_states, use_homography=use_hom,
     )
 
+    # A homography that was asked for and could not be fitted silently substitutes the
+    # nearest-keypoint approximation, which is the method this project describes as the
+    # old and wrong one. Say so. A run that degrades to a different algorithm without
+    # reporting it is worse than one that fails.
+    approx_frames = len(mini_court.homography_failed_frames)
+    if use_hom and approx_frames:
+        logger.warning(
+            f"  Homography could not be fitted on {approx_frames} of "
+            f"{len(video_frames)} frames ({100 * approx_frames / len(video_frames):.1f}%). "
+            f"Those frames fell back to nearest-keypoint approximation, which cannot "
+            f"correct perspective. Positions and any distance derived from them are "
+            f"approximate on those frames."
+        )
+    if mini_court.unmappable_positions:
+        logger.info(
+            f"  {mini_court.unmappable_positions} position(s) could not be mapped to the "
+            f"court and were omitted rather than defaulted to its centre."
+        )
+
     # Kalman smoothing (Phase 1, Step 3) - stabilizes the projected dots frame to
     # frame (João's feedback) and gives continuous velocity for the shot-speed stat
     # below, instead of depending on distance between two possibly-noisy shot-frame
@@ -805,12 +830,22 @@ def main():
     }]
 
 
-    for idx in range(len(ball_shot_frames) - 1):
-        start_frame = ball_shot_frames[idx]
-        end_frame   = ball_shot_frames[idx + 1]
-        duration_s  = (end_frame - start_frame) / fps  # real FPS, not hardcoded 24
-        if duration_s <= 0:
-            continue
+    # Every detected contact is counted, including the last one.
+    #
+    # This iterated range(len - 1) because the NEXT contact is needed to measure how far
+    # the opponent moved during the flight. The cost was that the final contact of every
+    # clip was never counted at all, so total_shots_p1 + total_shots_p2 was always
+    # exactly one below the number of contacts the pipeline had detected and drawn. On
+    # the reference clip that published 14 shots against 15 detected.
+    #
+    # Only the OPPONENT MOVEMENT figure genuinely needs the next contact. Ball speed
+    # comes from peak_speed_kmh_near_frame around the contact itself and is available
+    # for the last shot like any other, so nothing is guessed to make this work: the
+    # final shot is counted with its speed, and contributes no opponent-movement sample
+    # because there is no interval over which to measure one.
+    for idx, start_frame in enumerate(ball_shot_frames):
+        end_frame = (ball_shot_frames[idx + 1]
+                     if idx + 1 < len(ball_shot_frames) else None)
 
         ball_start = ball_mini_court[start_frame].get(1)
         if ball_start is None:
@@ -834,20 +869,36 @@ def main():
         )
         opponent_id = 1 if shooter_id == 2 else 2
 
-        opp_start = player_mini_court[start_frame].get(opponent_id)
-        opp_end   = player_mini_court[end_frame].get(opponent_id)
-        opp_speed_kmh = 0.0
-        if opp_start and opp_end:
-            opp_dist_px = measure_distance_between_points(opp_start, opp_end)
-            opp_dist_m  = convert_pixel_distance_to_meters(
-                opp_dist_px, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court()
-            )
-            opp_speed_kmh = opp_dist_m / duration_s * 3.6
+        # Opponent movement over the flight. None, not 0.0, when it cannot be measured:
+        # no next contact to measure to, a non-positive interval, or the opponent not
+        # mapped at one of the two frames.
+        #
+        # It was 0.0 with an unconditional sample, so an unmapped opponent contributed a
+        # "0 km/h" reading to their own average. That is a fabricated measurement of
+        # exactly the kind the rest of this pipeline refuses to make, and it biases the
+        # average downward in precisely the situations where tracking was worst.
+        opp_speed_kmh = None
+        duration_s = (end_frame - start_frame) / fps if end_frame is not None else 0.0
+        if duration_s > 0:
+            opp_start = player_mini_court[start_frame].get(opponent_id)
+            opp_end   = player_mini_court[end_frame].get(opponent_id)
+            if opp_start and opp_end:
+                opp_dist_px = measure_distance_between_points(opp_start, opp_end)
+                opp_dist_m  = convert_pixel_distance_to_meters(
+                    opp_dist_px, constants.DOUBLE_LINE_WIDTH, mini_court.get_width_of_mini_court()
+                )
+                opp_speed_kmh = opp_dist_m / duration_s * 3.6
 
         row = deepcopy(player_stats_data[-1])
         # Delay display by 3 frames so stats appear after visible racket contact,
         # not at the y-reversal detection point which can be slightly early.
-        row["frame_num"] = start_frame + 3
+        #
+        # Clamped to the last frame, because these rows are left-merged onto the frame
+        # index below: a row at frame_num >= len(video_frames) matches nothing and is
+        # dropped, taking its shot count with it. That only bites for a contact within
+        # 3 frames of the end of the clip, which is exactly the final shot this loop was
+        # just fixed to include.
+        row["frame_num"] = min(start_frame + 3, len(video_frames) - 1)
         row[f"player_{shooter_id}_number_of_shots"]   += 1
         if ball_speed_kmh > 0:
             # 0.0 means "no valid speed" (no data, or filtered as physically
@@ -857,9 +908,10 @@ def main():
             row[f"player_{shooter_id}_total_shot_speed"]  += ball_speed_kmh
             row[f"player_{shooter_id}_shot_speed_samples"] += 1
             row[f"player_{shooter_id}_last_shot_speed"]    = ball_speed_kmh
-        row[f"player_{opponent_id}_total_player_speed"] += opp_speed_kmh
-        row[f"player_{opponent_id}_player_speed_samples"] += 1
-        row[f"player_{opponent_id}_last_player_speed"]  = opp_speed_kmh
+        if opp_speed_kmh is not None:
+            row[f"player_{opponent_id}_total_player_speed"] += opp_speed_kmh
+            row[f"player_{opponent_id}_player_speed_samples"] += 1
+            row[f"player_{opponent_id}_last_player_speed"]  = opp_speed_kmh
 
         if cfg["pipeline"]["shot_classification"] and start_frame in shot_classifications:
             row[f"player_{shooter_id}_shot_type"] = shot_classifications[start_frame]["shot_type"]
@@ -1159,7 +1211,19 @@ def main():
 
     save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger,
                court_fit=court_fit, serve_speed_kmh=serve_speed,
-               trajectories_3d=trajectories_3d)
+               trajectories_3d=trajectories_3d,
+               calibration={
+                   "coordinate_mapping": "homography" if use_hom else "nearest_keypoint",
+                   "frames_total": len(video_frames),
+                   "frames_using_fallback_mapping": approx_frames,
+                   "positions_unmappable_and_omitted": mini_court.unmappable_positions,
+                   **({"warning": (
+                       f"{approx_frames} of {len(video_frames)} frames could not be "
+                       f"fitted with a homography and fell back to nearest-keypoint "
+                       f"approximation, which cannot correct perspective. Positions on "
+                       f"those frames are approximate."
+                   )} if use_hom and approx_frames else {}),
+               })
 
     # ── 9. Render output video ─────────────────────────────────────
     logger.info("[9/9] Rendering output video...")

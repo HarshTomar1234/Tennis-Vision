@@ -52,15 +52,29 @@ class ShotClassifier:
         serve_frames = set(serve_frames or ())
         shot_classifications = {}
         
-        # Skip if not enough shots
-        if len(ball_shot_frames) <= 1:
+        # A single detected contact is still a shot and is still classified. This
+        # returned early on <= 1, which was the same off-by-one seen from the other
+        # end: a clip with one contact reported none.
+        if not ball_shot_frames:
             return shot_classifications
-        
-        # Classify each shot
-        for i in range(len(ball_shot_frames)-1):
-            shot_frame = ball_shot_frames[i]
-            next_shot_frame = ball_shot_frames[i+1]
-            
+
+        # Classify every shot, including the last one.
+        #
+        # This iterated range(len - 1), because the NEXT shot frame is needed to measure
+        # the ball's vertical travel. The consequence was that the final contact of every
+        # clip was never classified at all: it got no shot type, no pose upgrade, and no
+        # entry in the returned dict. On the reference clip that is 14 classifications
+        # for 15 detected contacts, and the same off-by-one in main.py's statistics loop
+        # meant the published shot count was one low as well.
+        #
+        # The last shot has no successor, so its trajectory component is genuinely
+        # unavailable and is passed as 0.0 rather than guessed. That costs only the smash
+        # test, which requires a positive value; the shot still reaches the pose-based
+        # forehand/backhand upgrade, which is what actually decides it.
+        for i, shot_frame in enumerate(ball_shot_frames):
+            next_shot_frame = (ball_shot_frames[i+1]
+                               if i + 1 < len(ball_shot_frames) else None)
+
             # Get player who made the shot (closest to ball at shot frame)
             player_positions = player_mini_court_detections[shot_frame]
             if not player_positions or not ball_mini_court_detections.get(shot_frame, {}).get(1):
@@ -74,8 +88,11 @@ class ShotClassifier:
             player_pos = player_positions[player_shot_id]
             player_y = player_pos[1]
             
-            # Get ball trajectory
-            if shot_frame in ball_mini_court_detections and next_shot_frame in ball_mini_court_detections:
+            # Get ball trajectory. Unavailable for the final shot (no successor to
+            # measure against), which is a real absence rather than a zero measurement.
+            if (next_shot_frame is not None
+                    and shot_frame in ball_mini_court_detections
+                    and next_shot_frame in ball_mini_court_detections):
                 ball_start = ball_mini_court_detections[shot_frame][1]
                 ball_end = ball_mini_court_detections[next_shot_frame][1]
                 ball_trajectory_y = ball_end[1] - ball_start[1]

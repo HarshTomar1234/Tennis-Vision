@@ -126,6 +126,55 @@ class TestShotClassifier:
             color = self.clf.get_shot_color(shot_type)
             assert color != (255, 255, 255)
 
+    # ── every detected contact must be represented ──────────────────────────────
+    #
+    # classify_shots iterated range(len - 1), because measuring the ball's vertical
+    # travel needs the NEXT contact. The final contact of every clip was therefore never
+    # classified: no shot type, no pose upgrade, no entry in the result. On the reference
+    # clip that is 14 classifications for 15 detected contacts, and main.py's statistics
+    # loop had the identical off-by-one, so the published shot count was one low too.
+
+    @staticmethod
+    def _positions(frames, court_height=400):
+        """Two players and a ball on the mini-court at each of `frames`."""
+        players = {f: {1: (100.0, 350.0), 2: (100.0, 50.0)} for f in frames}
+        ball    = {f: {1: (100.0, 200.0 + 10.0 * i)} for i, f in enumerate(frames)}
+        return players, ball
+
+    def test_every_detected_shot_is_classified(self):
+        frames = [10, 40, 70, 100, 130]
+        players, ball = self._positions(frames)
+
+        result = self.clf.classify_shots(players, ball, frames, 400)
+
+        assert len(result) == len(frames), (
+            f"{len(frames)} contacts detected but {len(result)} classified: the last "
+            f"shot is being dropped"
+        )
+        assert set(result) == set(frames)
+
+    def test_final_shot_is_classified(self):
+        """Named separately: it is the one the off-by-one silently removed."""
+        frames = [10, 40, 70]
+        players, ball = self._positions(frames)
+
+        result = self.clf.classify_shots(players, ball, frames, 400)
+
+        assert frames[-1] in result, "the final contact must carry a shot type"
+        assert result[frames[-1]]["shot_type"]
+
+    def test_a_lone_contact_is_still_a_shot(self):
+        """The same off-by-one from the other end: a one-contact clip reported none."""
+        frames = [42]
+        players, ball = self._positions(frames)
+
+        result = self.clf.classify_shots(players, ball, frames, 400)
+
+        assert len(result) == 1
+
+    def test_no_contacts_classifies_nothing(self):
+        assert self.clf.classify_shots({}, {}, [], 400) == {}
+
     def test_old_volley_threshold_would_fail(self):
         """Prove that threshold=150 (old broken value) caught mid-court as volley."""
         broken_clf = __import__("utils").ShotClassifier(volley_threshold=150)
