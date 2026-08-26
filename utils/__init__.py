@@ -16,7 +16,7 @@ from .kalman_smoother import (
     smooth_trajectories,
     peak_speed_kmh_near_frame,
 )
-from .player_selection import select_two_players
+from .player_selection import assess_selection, select_two_players
 from .pose_estimator import PoseEstimator
 from .pose_shot_classifier import classify_forehand_backhand, FOREHAND, BACKHAND
 from .hit_bounce_classifier import (

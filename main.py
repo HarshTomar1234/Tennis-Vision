@@ -46,6 +46,7 @@ from utils import (
     merge_nearby_candidates,
     peak_speed_kmh_near_frame,
     read_video,
+    assess_selection,
     select_two_players,
     save_video,
     smooth_trajectories,
@@ -255,7 +256,8 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                calibration: dict | None = None,
                fps_support: dict | None = None,
                rally_decoding: dict | None = None,
-               shot_classification: dict | None = None):
+               shot_classification: dict | None = None,
+               player_selection: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -300,6 +302,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         # measured on. Every event threshold here is counted in frames, so this is a
         # precondition for those numbers applying at all, not a footnote.
         summary["frame_rate_support"] = fps_support
+    if player_selection:
+        # Whether the two tracks the whole report is about could plausibly be the two
+        # players. Everything per-player downstream depends on this and nothing else
+        # checked it.
+        summary["player_selection"] = player_selection
     if shot_classification:
         # What the shot layer actually decided, and on what basis. The physics counts in
         # particular: a layer that only ever removes labels is a validation filter, and
@@ -592,10 +599,30 @@ def main():
     logger.info("[5/9] Filtering to 2 main players...")
     # Shared with the evals (utils.player_selection) so they grade the same two players
     # the pipeline reports on, rather than every person YOLO found in the stands.
+    people_detected = len({tid for frame in player_detections for tid in frame})
     player_detections, player_id_map = select_two_players(
         player_tracker, player_detections, court_keypoints
     )
-    logger.info(f"  Player ID mapping: {player_id_map}")
+    logger.info(f"  Player ID mapping: {player_id_map} "
+                f"(chosen from {people_detected} detected people)")
+
+    # The court gate stops a clip whose COURT was fitted to the crowd. Nothing stopped a
+    # clip whose PLAYERS were. Measured across the nine evaluation clips, input_video_11
+    # passes the court gate at 0.327 line support and still selects two tracks on the
+    # same side of the net, one present for 40% of frames with a 199-frame hole. Singles
+    # is played across the net, so that is checkable with no ground truth at all.
+    selection = assess_selection(
+        player_detections,
+        net_y=(court_keypoints[1] + court_keypoints[5]) / 2.0,
+        people_detected=people_detected,
+    )
+    if selection.status == "failed":
+        logger.warning(f"  {selection.reason}")
+    elif selection.status == "degraded":
+        logger.warning(f"  {selection.reason}")
+    else:
+        logger.info(f"  Player selection: {selection.reason} "
+                    f"({selection.coverage[0]:.0%} / {selection.coverage[1]:.0%} coverage)")
 
     # ── 6. Mini-court setup ────────────────────────────────────────
     logger.info("[6/9] Building mini-court visualization...")
@@ -1370,6 +1397,7 @@ def main():
                },
                fps_support=fps_support.as_dict(),
                rally_decoding=decode_diagnostics or None,
+               player_selection=selection.as_dict(),
                shot_classification={
                    "shots": len(shot_classifications),
                    "types": dict(Counter(v["shot_type"]

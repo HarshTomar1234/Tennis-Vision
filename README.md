@@ -559,7 +559,23 @@ recognised.
 - **The learned temporal shot classifier is not wired into the pipeline.** It scores 73.4%
   on unseen subjects across 6 classes, but it is trained on THETIS indoor demonstration
   footage and its transfer to broadcast video is unmeasured.
-- **Player detection has no ground-truth eval.**
+- **Player detection has no ground-truth eval.** Precision, recall, IDF1 and ID switches
+  need labelled boxes that do not exist for this footage. What does exist is a sanity
+  check that needs no labels, because singles is played across the net: two selected
+  tracks on the same half cannot both be players. Across the 9 evaluation clips
+  (`eval/player_selection_sanity.py`), **6 of 9 pass every check**:
+
+  | Clip | Court gate | Player selection |
+  |---|---|---|
+  | 3, 5, 7, 8, 9, 10 | pass | pass |
+  | 4 | pass (0.476) | degraded, 26-frame gaps |
+  | 6 | **fail** (0.071) | fail |
+  | 11 | pass (0.327) | **fail**, both tracks one side of the net |
+
+  Clip 11 is the interesting one and it is why the pipeline gained a second gate. Its
+  court fits fine, so nothing stopped the run, and it still selected two tracks on the
+  same half with one of them present for 40% of frames. Player-selection quality is now
+  assessed on every run and reported in `summary.json`, the same way court validity is.
 - **Ball height is modelled, not measured**, and cannot be otherwise from this camera
   geometry. It is anchored at known contact heights and interpolated by gravity, so it
   degrades whenever a contact is missed.
