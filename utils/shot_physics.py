@@ -1,7 +1,32 @@
 """
 utils/shot_physics.py
 ─────────────────────
-Classifies shots from physical evidence, and reports the evidence alongside the label.
+Tests shots against physical evidence, and reports the evidence alongside the verdict.
+
+What this actually turns out to be
+-----------------------------------
+It was built as a classifier: replace position-guessed Volley and Smash labels with
+physically evidenced ones. Measured across the 9 evaluation clips, 81 shots
+(eval/physics_evidence_rate.py), it is not behaving like one:
+
+    positively evidenced       1 shot   (1.2%)
+    downgraded for lack of
+      evidence                20 shots  (24.7%)
+
+A 20-to-1 rejection-to-evidence ratio. On real broadcast rallies almost nothing is a
+volley or a smash, so the honest description is a VALIDATION FILTER: its job is
+rejecting labels nothing supports, and it does that on a quarter of all shots.
+
+That is worth keeping and worth naming correctly. A quarter of shots would otherwise
+carry a confident Volley or Smash label with no evidence behind it, which is the exact
+failure this project exists to prevent. The rejection logic must not be weakened on the
+grounds that it "rarely fires positively" - rarely firing positively is the correct
+behaviour when the shots are rare.
+
+Note the contrast with serve detection, which is genuine positive physical evidence and
+does fire: 14 serves evidenced across the same 81 shots. The difference is not that
+physics works for one and not the other, it is that serves are common and smashes are
+not.
 
 Why this exists
 ---------------

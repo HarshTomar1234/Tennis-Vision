@@ -99,9 +99,12 @@ because at broadcast camera angles raising the ball and pushing it further away 
 almost the same image direction. A free ballistic fit can match the picture to a pixel
 while being metres wrong in space.
 
-**Shot classification.** Rule-based serve, forehand, backhand, volley and smash, with a
-pose-based forehand and backhand upgrade via MediaPipe. The forehand/backhand half of this
-is measured at 54% against ground truth and is documented under Limitations as unreliable.
+**Shot classification.** Serve comes from physical evidence. Volley and Smash are tested
+against physical evidence and, when none is found, downgraded to "Groundstroke" rather
+than reported: across 9 clips and 81 shots that layer evidences 1 and rejects 20, so it
+is a validation filter and is described as one. Forehand and backhand come from a
+pose-based body-geometry test via MediaPipe, measured at 54% against ground truth and
+documented under Limitations as unreliable.
 
 The pose test is body-relative: whether the hitting arm crosses the shoulder midline
 horizontally, which makes it independent of handedness, facing, and which side of the
@@ -271,6 +274,28 @@ homography reprojection error is useless for this. Across 9 clips it ranged 1.40
 on correct fits and 2.13px on a visibly wrong one, with 14 of 14 RANSAC inliers every time.
 It measures whether the 14 points are self-consistent, and a tidy quadrilateral on the
 stands is perfectly self-consistent.
+
+### Shot type physics
+
+`utils/shot_physics.py` tests Volley, Smash and Lob against physical facts rather than
+court position: a smash is struck above the head and not from a baseline, a volley has no
+bounce between it and the previous contact, a lob's 3-D apex is far above net height.
+
+Across the 9 evaluation clips, 81 shots (`eval/physics_evidence_rate.py`):
+
+| Outcome | Shots | Share |
+|---|---|---|
+| Positively evidenced as Volley, Smash or Lob | **1** | 1.2% |
+| Downgraded to "Groundstroke" for lack of evidence | **20** | 24.7% |
+| Serves evidenced separately by `utils/serve_detector.py` | 14 | 17.3% |
+
+The layer rejects twenty labels for every one it evidences, which makes it a validation
+filter rather than a classifier, and it is described as one throughout. That is not a
+failure: a quarter of all shots would otherwise carry a confident Volley or Smash label
+with nothing behind it. Serve detection is the contrast and does fire positively, because
+serves are common and smashes are not.
+
+Two of the nine clips saw the layer do nothing at all: no evidence and no rejections.
 
 ### Serve speed
 
@@ -520,8 +545,17 @@ recognised.
   rather than a better classifier on the same landmarks, and it is measured by
   `eval/pose_availability_at_contacts.py`.
 
-- **Volley and smash labels come from position rules with no ground truth.** Serve is now
-  detected from physical evidence. Those two are not.
+- **Volley and smash are not classified, they are filtered.** `utils/shot_physics.py` was
+  built to replace the position-guessed Volley and Smash labels with physically evidenced
+  ones. Measured across the 9 evaluation clips, 81 shots, it evidences **1** and rejects
+  **20**, a 20-to-1 ratio (`eval/physics_evidence_rate.py`). On broadcast rallies almost
+  nothing is a volley or a smash, so what it actually does is downgrade a quarter of all
+  shots to "Groundstroke" for lack of evidence. That is worth having and it is a
+  validation filter, not a classifier, and this README calls it one.
+
+  Serve is the contrast: genuine positive physical evidence, firing 14 times across the
+  same 81 shots. The difference is not that physics works for one and not the other, it
+  is that serves are common and smashes are not.
 - **The learned temporal shot classifier is not wired into the pipeline.** It scores 73.4%
   on unseen subjects across 6 classes, but it is trained on THETIS indoor demonstration
   footage and its transfer to broadcast video is unmeasured.
