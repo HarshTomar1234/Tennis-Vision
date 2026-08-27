@@ -19,10 +19,32 @@ def stub_path_for_video(base_stub: str, video_path: str) -> str:
         tracker_stubs/ball_detections_tracknet.pkl
         → tracker_stubs/ball_detections_tracknet__clip_05_wimbledon.pkl
 
-    The stem alone is not proof of identity (two different files can share a name), so
-    callers should still verify with `stub_matches_frames`.
+    The stem alone is NOT proof of identity, and the frame-count check is not either.
+    Two clips can share a filename and a length:
+
+        matches/2026-01-05/rally.mp4     15 s at 25 fps = 375 frames
+        matches/2026-01-12/rally.mp4     15 s at 25 fps = 375 frames
+
+    Those collide on the stem, pass `stub_matches_frames`, and the second clip is then
+    analysed with the first one's ball positions. Nothing crashes and nothing looks wrong,
+    which is the same silent failure this keying was introduced to stop, one level down.
+
+    So the byte size goes into the key as well. Two different video files sharing a name
+    AND an exact byte count is not a case worth engineering against; sharing a name alone
+    is ordinary. Callers should still verify with `stub_matches_frames`, which catches the
+    remaining case of the same file re-cut to a different length.
+
+        tracker_stubs/ball_detections_tracknet.pkl
+        → tracker_stubs/ball_detections_tracknet__clip_05_wimbledon_4615919.pkl
+
+    A video that does not exist keeps the name-only key: it cannot be analysed anyway, and
+    this function is called in tests with paths that were never on disk.
     """
     stem = os.path.splitext(os.path.basename(video_path))[0]
+    try:
+        stem = f"{stem}_{os.path.getsize(video_path)}"
+    except OSError:
+        pass
     root, ext = os.path.splitext(base_stub)
     return f"{root}__{stem}{ext}"
 

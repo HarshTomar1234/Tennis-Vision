@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -249,6 +250,49 @@ def setup_logging(cfg: dict) -> logging.Logger:
 
 # ── Stats output ───────────────────────────────────────────────────────────────
 
+def _json_scalar(value):
+    """
+    Coerce a numpy scalar to the Python type json can write.
+
+    json.dump refuses numpy types, and it refuses them HALFWAY THROUGH: it streams to the
+    file and then raises, leaving a truncated summary on disk that looks like a file and
+    parses like garbage. That has happened once already, from a single numpy.bool_ in the
+    player-selection payload, and it was found only because a later script tried to read
+    the file back.
+
+    Coercing here rather than at each call site means a future block cannot reintroduce it
+    by forgetting.
+    """
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"{type(value).__name__} is not JSON serialisable: {value!r}")
+
+
+def _write_json(path, payload, logger) -> None:
+    """
+    Write JSON, or write nothing.
+
+    Two rules, both learned the hard way:
+
+    * **Serialise fully before opening the file.** json.dump streams, so any error part
+      way through leaves a truncated file behind. Building the string first means a
+      failure leaves the previous state untouched and raises somewhere a human sees it.
+    * **allow_nan=False.** Bare NaN is invalid JSON that Python happens to accept and
+      every strict parser rejects, so a NaN here produces a file that reads fine in the
+      tests and fails in a browser, in jq, and in any other language. utils/viewer_3d.py
+      already refuses NaN for exactly this reason; the summary should not be laxer than
+      the viewer.
+    """
+    text = json.dumps(payload, indent=2, allow_nan=False, default=_json_scalar)
+    Path(path).write_text(text, encoding="utf-8")
+
+
 def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                court_fit: tuple[bool, float] | None = None,
                court_detail: dict | None = None,
@@ -376,16 +420,14 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
             }
 
     json_path = out / f"summary_{stamp}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    _write_json(json_path, summary, logger)
     logger.info(f"Summary JSON → {json_path}")
 
     if trajectories_3d:
         # Written separately: the viewer needs the full arcs, and embedding a few
         # thousand points in the summary would drown the numbers a human reads.
         scene_path = out / f"trajectory3d_{stamp}.json"
-        with open(scene_path, "w", encoding="utf-8") as f:
-            json.dump({
+        _write_json(scene_path, {
                 "segments": [
                     {
                         "start_frame": t.start_frame,
@@ -407,7 +449,7 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                     }
                     for t in trajectories_3d
                 ],
-            }, f, indent=2)
+            }, logger)
         logger.info(f"3-D scene  → {scene_path}")
 
 

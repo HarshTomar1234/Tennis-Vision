@@ -72,7 +72,11 @@ def _load_weights(path: str = DEFAULT_WEIGHTS_PATH) -> dict | None:
         )
         return None
 
-    _cached_weights = json.loads(Path(path).read_text())
+    # encoding pinned: read_text() defaults to the platform locale (cp1252 on
+    # Windows, utf-8 on Linux), which is the same host-dependent assumption that
+    # put an absolute path into the 3-D viewer. The weights are ASCII today, so this
+    # is prevention rather than a live bug.
+    _cached_weights = json.loads(Path(path).read_text(encoding="utf-8"))
     _cached_path = path
     return _cached_weights
 

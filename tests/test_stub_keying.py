@@ -147,3 +147,58 @@ def test_label_tool_accepts_a_matching_stub(tmp_path):
         pickle.dump([{1: [0, 0, 1, 1]}] * 570, f)
 
     assert len(load_detections(str(stub), total_frames=570, what="Ball")) == 570
+
+
+# ─────────────────────────────────────────────────────────────────
+# Same filename, different clip
+# ─────────────────────────────────────────────────────────────────
+#
+# The stem alone is not identity and the frame-count check is not either. Two clips can
+# share a filename AND a length, which is ordinary rather than exotic:
+#
+#     matches/2026-01-05/rally.mp4    15 s at 25 fps = 375 frames
+#     matches/2026-01-12/rally.mp4    15 s at 25 fps = 375 frames
+#
+# Those collided on the stem, passed stub_matches_frames, and the second clip was then
+# analysed with the first one's ball positions. Six eval scripts read stubs with
+# read_from_stub=True and produce published numbers, so this reached results.
+
+
+def test_same_name_different_file_does_not_collide(tmp_path):
+    a = tmp_path / "a"; b = tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "rally.mp4").write_bytes(b"x" * 1000)
+    (b / "rally.mp4").write_bytes(b"y" * 2000)      # same name, different clip
+
+    key_a = stub_path_for_video(BASE, str(a / "rally.mp4"))
+    key_b = stub_path_for_video(BASE, str(b / "rally.mp4"))
+
+    assert key_a != key_b, (
+        "two different videos sharing a filename must not share a detection cache"
+    )
+
+
+def test_the_same_file_keeps_one_stable_key(tmp_path):
+    """The guard must not defeat caching, which is the whole point of a stub."""
+    video = tmp_path / "rally.mp4"
+    video.write_bytes(b"x" * 1000)
+
+    assert stub_path_for_video(BASE, str(video)) == stub_path_for_video(BASE, str(video))
+
+
+def test_length_check_still_catches_a_recut_of_the_same_file(tmp_path):
+    """
+    Size in the key handles different files. stub_matches_frames still handles the same
+    path re-cut to a different length, so both guards are needed.
+    """
+    assert stub_matches_frames([{}] * 40, [None] * 570) is False
+    assert stub_matches_frames([{}] * 570, [None] * 570) is True
+
+
+def test_a_missing_video_keeps_the_name_only_key():
+    """
+    A video that does not exist cannot be analysed, and this function is called in tests
+    with paths that were never on disk. It must not raise.
+    """
+    key = stub_path_for_video(BASE, "input_videos/never_existed.mp4")
+    assert key.endswith("__never_existed.pkl")
