@@ -149,3 +149,31 @@ def test_version_is_consistent_across_the_project():
     assert packaged == latest_release, (
         f"pyproject says {packaged}, newest CHANGELOG entry is {latest_release}"
     )
+
+
+def test_readme_test_count_is_current():
+    """
+    The README's test count has gone stale four times (204, 244, 350, 383), because it is
+    written by hand and nothing checks it. A number that drifts is a small thing on its
+    own and a bad thing in a project whose pitch is that its numbers are accurate.
+
+    Collects without running, so this is cheap and cannot recurse.
+    """
+    import re
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q",
+         "-p", "no:cacheprovider"],
+        capture_output=True, text=True, cwd=REPO, timeout=300,
+    )
+    collected = int(re.search(r"(\d+) tests? collected", result.stdout).group(1))
+
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    claimed = int(re.search(r"\*\*(\d+) unit and integration tests\*\*", readme).group(1))
+
+    assert claimed == collected, (
+        f"README claims {claimed} tests, pytest collects {collected}. "
+        f"Update the three counts in README.md."
+    )
