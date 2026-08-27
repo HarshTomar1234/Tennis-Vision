@@ -32,7 +32,7 @@ from utils import (
     PoseEstimator,
     ShotClassifier,
     UILayoutManager,
-    assess_court_fit,
+    assess_court_fit_detail,
     classify_contact_vs_bounce,
     classify_floor_level,
     classify_forehand_backhand,
@@ -251,6 +251,7 @@ def setup_logging(cfg: dict) -> logging.Logger:
 
 def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                court_fit: tuple[bool, float] | None = None,
+               court_detail: dict | None = None,
                serve_speed_kmh: float = 0.0,
                trajectories_3d: list | None = None,
                calibration: dict | None = None,
@@ -292,6 +293,10 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         is_valid, support = court_fit
         summary["court_calibrated"] = bool(is_valid)
         summary["court_line_support"] = round(float(support), 3)
+        if court_detail:
+            # Why it failed, not just that it did. A clip with cuts in it and a clip that
+            # never shows a court both fail, and only one of them the user can fix.
+            summary["court_detail"] = court_detail
         if not is_valid:
             summary["warning"] = (
                 "Court fit failed validation - speeds, distances and mini-court "
@@ -604,17 +609,19 @@ def main():
 
     logger.info(f"  {len(all_court_keypoints)} keypoint sets ready")
 
-    court_fit = assess_court_fit(video_frames, all_court_keypoints)
-    court_valid, line_support = court_fit
+    court_valid, line_support, court_detail = assess_court_fit_detail(
+        video_frames, all_court_keypoints)
+    court_fit = (court_valid, line_support)
     if court_valid:
         logger.info(f"  Court fit OK (line support {line_support:.3f})")
     else:
         logger.warning(
             f"  COURT FIT FAILED VALIDATION (line support {line_support:.3f} < "
-            f"{MIN_LINE_SUPPORT}). The detected keypoints do not lie on painted "
-            f"court lines, so speeds, distances and mini-court positions from this "
-            f"run are NOT measurements. See utils/court_validity.py."
+            f"{MIN_LINE_SUPPORT}). Speeds, distances and mini-court positions from this "
+            f"run are NOT measurements."
         )
+        # Which KIND of failure, because the two need different things from the user.
+        logger.warning(f"  {court_detail['reason']}")
 
     # ── 5. Player selection ────────────────────────────────────────
     logger.info("[5/9] Filtering to 2 main players...")
@@ -1402,7 +1409,8 @@ def main():
         logger.info("  3-D reconstruction: no reconstructable flight segments")
 
     save_stats(stats_df, cfg["io"].get("output_stats_dir", "output/stats"), logger,
-               court_fit=court_fit, serve_speed_kmh=serve_speed,
+               court_fit=court_fit, court_detail=court_detail,
+               serve_speed_kmh=serve_speed,
                trajectories_3d=trajectories_3d,
                calibration={
                    "coordinate_mapping": "homography" if use_hom else "nearest_keypoint",

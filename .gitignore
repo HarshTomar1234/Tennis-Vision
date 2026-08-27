@@ -109,6 +109,7 @@ datasets/eval_clips/
 # arithmetic selection rule and the frozen timestamps, so anyone with the source video
 # can rebuild the identical set and check the numbers against results.json.
 datasets/heldout/clips/
+datasets/heldout/segments/
 !datasets/heldout/manifest.json
 !datasets/heldout/results.json
 

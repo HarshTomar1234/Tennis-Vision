@@ -29,4 +29,9 @@ from .hit_bounce_classifier import (
     derive_shot_frames,
 )
 from .ui_layout_manager import UILayoutManager, create_layout_for_frame
-from .court_validity import assess_court_fit, line_support_score, MIN_LINE_SUPPORT
+from .court_validity import (
+    assess_court_fit,
+    assess_court_fit_detail,
+    line_support_score,
+    MIN_LINE_SUPPORT,
+)

@@ -143,10 +143,46 @@ def assess_court_fit(
         sample_count:        how many evenly spaced frames to score.
 
     Returns:
-        (is_valid, median_line_support)
+        (is_valid, median_line_support). `assess_court_fit_detail` returns the same
+        judgement with the per-frame breakdown, which distinguishes two very different
+        failures the median alone cannot.
+    """
+    valid, median, _ = assess_court_fit_detail(frames, keypoints_per_frame, sample_count)
+    return valid, median
+
+
+def assess_court_fit_detail(
+    frames: list[np.ndarray],
+    keypoints_per_frame: list,
+    sample_count: int = 12,
+) -> tuple[bool, float, dict]:
+    """
+    Judge the court fit, and say WHY when it fails.
+
+    The median answers "is this clip usable" and nothing else. Two clips that both fail
+    can be in completely different situations, and the fix differs:
+
+        0.05 0.05 0.05 0.60 0.58 0.58 0.57 0.47 0.01 0.03 0.00 0.05   median 0.053
+        0.12 0.13 0.14 0.06 0.15 0.13 0.17 0.09 0.13 0.14 0.07 0.05   median 0.131
+
+    The first is a real court view with camera cuts either side of it: five of twelve
+    sampled frames are a perfectly good court, and the user can fix it by trimming. The
+    second never shows a playable court at all. Reporting only the median calls both
+    "court fit failed" and leaves the user with nowhere to go.
+
+    Both shapes came out of the held-out benchmark, where every clip was a fixed-length
+    window cut from a full broadcast rather than a hand-trimmed rally. A broadcast window
+    of any length routinely contains the end of a point, a crowd shot, a replay and the
+    next serve, and this pipeline assumes ONE CONTINUOUS TAKE.
+
+    Returns:
+        (is_valid, median_line_support, detail) where detail carries the per-frame
+        scores, how many passed, and whether the pattern looks like a camera cut.
     """
     if not frames:
-        return False, 0.0
+        return False, 0.0, {"sampled": 0, "passed": 0, "scores": [],
+                            "likely_camera_cut": False,
+                            "reason": "no frames"}
 
     indices = np.linspace(0, len(frames) - 1, min(sample_count, len(frames)), dtype=int)
 
@@ -159,4 +195,30 @@ def assess_court_fit(
         scores.append(line_support_score(frames[i], kp))
 
     median = float(np.median(scores)) if scores else 0.0
-    return median >= MIN_LINE_SUPPORT, median
+    passed = sum(1 for s in scores if s >= MIN_LINE_SUPPORT)
+    valid = median >= MIN_LINE_SUPPORT
+
+    # A clip that fails overall while a real share of its frames pass is not "not tennis".
+    # It is tennis with something else spliced into it. One third is not a tuned constant:
+    # it is simply "enough frames to be a real segment rather than a few lucky ones", and
+    # it changes no gate, only the explanation attached to a failure that already happened.
+    likely_cut = (not valid) and passed >= max(2, len(scores) // 3)
+
+    if valid:
+        reason = (f"{passed} of {len(scores)} sampled frames sit on painted court lines "
+                  f"(median support {median:.3f})")
+    elif likely_cut:
+        reason = (f"Court fit failed overall (median support {median:.3f}), but {passed} "
+                  f"of {len(scores)} sampled frames DO show a valid court. That pattern is "
+                  f"a clip containing camera cuts, replays or crowd shots rather than one "
+                  f"continuous view of play. This pipeline assumes a single continuous "
+                  f"take; trim the clip to one rally and it will analyse.")
+    else:
+        reason = (f"Court fit failed: only {passed} of {len(scores)} sampled frames lie on "
+                  f"painted court lines (median support {median:.3f}). No part of this clip "
+                  f"shows a court this model recognises.")
+
+    detail = {"sampled": len(scores), "passed": passed,
+              "scores": [round(s, 3) for s in scores],
+              "likely_camera_cut": bool(likely_cut), "reason": reason}
+    return valid, median, detail

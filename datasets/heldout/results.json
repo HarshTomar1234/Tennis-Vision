@@ -1,0 +1,1360 @@
+{
+  "manifest": "heldout-2026-09-01",
+  "clips": [
+    {
+      "clip_id": "H00",
+      "filename": "heldout_H00_t3400.mp4",
+      "source_start_s": 3400,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.056)",
+        "player tracking degraded",
+        "ball seen on 28% of frames",
+        "1 high-confidence decoder override(s)"
+      ],
+      "elapsed_s": 192.1,
+      "summary": {
+        "generated_at": "20260827_172540",
+        "total_shots_p1": 1,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 19.1,
+        "avg_shot_speed_p2_kmh": 88.9,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.056,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 5,
+          "scores": [
+            0.049,
+            0.058,
+            0.053,
+            0.596,
+            0.578,
+            0.591,
+            0.569,
+            0.471,
+            0.013,
+            0.031,
+            0.004,
+            0.044
+          ],
+          "likely_camera_cut": true,
+          "reason": "Court fit failed overall (median support 0.056), but 5 of 12 sampled frames DO show a valid court. That pattern is a clip containing camera cuts, replays or crowd shots rather than one continuous view of play. This pipeline assumes a single continuous take; trim the clip to one rally and it will analyse."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 103,
+          "coverage": 0.275,
+          "longest_gap_frames": 67
+        },
+        "player_selection": {
+          "status": "degraded",
+          "player_1_coverage": 0.267,
+          "player_2_coverage": 0.405,
+          "player_1_longest_gap_frames": 275,
+          "player_2_longest_gap_frames": 122,
+          "players_on_opposite_sides": true,
+          "people_detected": 47,
+          "warning": "Player tracking is incomplete: player 1 is present on only 27% of frames; player 1 is missing for 275 consecutive frames; player 2 is present on only 41% of frames; player 2 is missing for 122 consecutive frames. Shots played during those stretches cannot be attributed, so the per-player counts are an under-count."
+        },
+        "shot_classification": {
+          "shots": 3,
+          "types": {
+            "Serve": 2,
+            "Backhand": 1
+          },
+          "serve_evidenced": 2,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 9,
+          "relabelled": 2,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            54
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H01",
+      "filename": "heldout_H01_t3950.mp4",
+      "source_start_s": 3950,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.133)",
+        "player selection failed",
+        "ball seen on 12% of frames"
+      ],
+      "elapsed_s": 197.4,
+      "summary": {
+        "generated_at": "20260827_172857",
+        "total_shots_p1": 5,
+        "total_shots_p2": 0,
+        "avg_shot_speed_p1_kmh": 29.2,
+        "avg_shot_speed_p2_kmh": 0.0,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.133,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 1,
+          "scores": [
+            0.089,
+            0.169,
+            0.191,
+            0.173,
+            0.138,
+            0.244,
+            0.129,
+            0.196,
+            0.044,
+            0.053,
+            0.053,
+            0.071
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 1 of 12 sampled frames lie on painted court lines (median support 0.133). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 44,
+          "coverage": 0.117,
+          "longest_gap_frames": 62
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.331,
+          "player_2_coverage": 0.0,
+          "player_1_longest_gap_frames": 251,
+          "player_2_longest_gap_frames": 375,
+          "players_on_opposite_sides": false,
+          "people_detected": 30,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 33% of frames; player 1 is missing for 251 consecutive frames; player 2 is present on only 0% of frames; player 2 is missing for 375 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 5,
+          "types": {
+            "Forehand": 2,
+            "Backhand": 2,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 9,
+          "relabelled": 1,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H02",
+      "filename": "heldout_H02_t4500.mp4",
+      "source_start_s": 4500,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.038)",
+        "player tracking degraded",
+        "ball seen on 22% of frames"
+      ],
+      "elapsed_s": 189.5,
+      "summary": {
+        "generated_at": "20260827_173207",
+        "total_shots_p1": 1,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 9.5,
+        "avg_shot_speed_p2_kmh": 115.3,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.038,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 3,
+          "scores": [
+            0.009,
+            0.036,
+            0.062,
+            0.04,
+            0.022,
+            0.084,
+            0.0,
+            0.0,
+            0.0,
+            0.511,
+            0.533,
+            0.542
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 3 of 12 sampled frames lie on painted court lines (median support 0.038). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 82,
+          "coverage": 0.219,
+          "longest_gap_frames": 92
+        },
+        "player_selection": {
+          "status": "degraded",
+          "player_1_coverage": 0.163,
+          "player_2_coverage": 0.187,
+          "player_1_longest_gap_frames": 258,
+          "player_2_longest_gap_frames": 305,
+          "players_on_opposite_sides": true,
+          "people_detected": 31,
+          "warning": "Player tracking is incomplete: player 1 is present on only 16% of frames; player 1 is missing for 258 consecutive frames; player 2 is present on only 19% of frames; player 2 is missing for 305 consecutive frames. Shots played during those stretches cannot be attributed, so the per-player counts are an under-count."
+        },
+        "shot_classification": {
+          "shots": 3,
+          "types": {
+            "Forehand": 3
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 10,
+          "relabelled": 0,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H03",
+      "filename": "heldout_H03_t5050.mp4",
+      "source_start_s": 5050,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.156)",
+        "player selection failed",
+        "ball seen on 6% of frames"
+      ],
+      "elapsed_s": 203.0,
+      "summary": {
+        "generated_at": "20260827_173529",
+        "total_shots_p1": 3,
+        "total_shots_p2": 3,
+        "avg_shot_speed_p1_kmh": 25.2,
+        "avg_shot_speed_p2_kmh": 44.8,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.156,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.049,
+            0.049,
+            0.04,
+            0.156,
+            0.111,
+            0.164,
+            0.218,
+            0.156,
+            0.196,
+            0.182,
+            0.124,
+            0.16
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.156). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 23,
+          "coverage": 0.061,
+          "longest_gap_frames": 173
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.211,
+          "player_2_coverage": 0.787,
+          "player_1_longest_gap_frames": 296,
+          "player_2_longest_gap_frames": 80,
+          "players_on_opposite_sides": false,
+          "people_detected": 46,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 21% of frames; player 1 is missing for 296 consecutive frames; player 2 is present on only 79% of frames; player 2 is missing for 80 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 6,
+          "types": {
+            "Backhand": 1,
+            "Serve": 1,
+            "Forehand": 4
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 7,
+          "relabelled": 0,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H04",
+      "filename": "heldout_H04_t5600.mp4",
+      "source_start_s": 5600,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.078)",
+        "player tracking degraded",
+        "ball seen on 28% of frames",
+        "1 high-confidence decoder override(s)"
+      ],
+      "elapsed_s": 189.9,
+      "summary": {
+        "generated_at": "20260827_173839",
+        "total_shots_p1": 8,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 9.9,
+        "avg_shot_speed_p2_kmh": 40.4,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.078,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 4,
+          "scores": [
+            0.027,
+            0.08,
+            0.058,
+            0.076,
+            0.04,
+            0.076,
+            0.08,
+            0.018,
+            0.44,
+            0.462,
+            0.493,
+            0.6
+          ],
+          "likely_camera_cut": true,
+          "reason": "Court fit failed overall (median support 0.078), but 4 of 12 sampled frames DO show a valid court. That pattern is a clip containing camera cuts, replays or crowd shots rather than one continuous view of play. This pipeline assumes a single continuous take; trim the clip to one rally and it will analyse."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 107,
+          "coverage": 0.285,
+          "longest_gap_frames": 54
+        },
+        "player_selection": {
+          "status": "degraded",
+          "player_1_coverage": 0.672,
+          "player_2_coverage": 0.325,
+          "player_1_longest_gap_frames": 123,
+          "player_2_longest_gap_frames": 253,
+          "players_on_opposite_sides": true,
+          "people_detected": 36,
+          "warning": "Player tracking is incomplete: player 1 is present on only 67% of frames; player 1 is missing for 123 consecutive frames; player 2 is present on only 33% of frames; player 2 is missing for 253 consecutive frames. Shots played during those stretches cannot be attributed, so the per-player counts are an under-count."
+        },
+        "shot_classification": {
+          "shots": 10,
+          "types": {
+            "Backhand": 1,
+            "Forehand": 9
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 15,
+          "relabelled": 3,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            230
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H05",
+      "filename": "heldout_H05_t6150.mp4",
+      "source_start_s": 6150,
+      "verdict": "REFUSED",
+      "failures": [
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "player selection failed",
+        "ball seen on 49% of frames",
+        "1 high-confidence decoder override(s)"
+      ],
+      "elapsed_s": 191.5,
+      "summary": {
+        "generated_at": "20260827_174148",
+        "total_shots_p1": 4,
+        "total_shots_p2": 4,
+        "avg_shot_speed_p1_kmh": 88.5,
+        "avg_shot_speed_p2_kmh": 36.0,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "serve_avg_flight_speed_kmh": 150.2,
+        "court_calibrated": true,
+        "court_line_support": 0.311,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 6,
+          "scores": [
+            0.507,
+            0.524,
+            0.493,
+            0.516,
+            0.48,
+            0.484,
+            0.116,
+            0.031,
+            0.142,
+            0.0,
+            0.004,
+            0.0
+          ],
+          "likely_camera_cut": false,
+          "reason": "6 of 12 sampled frames sit on painted court lines (median support 0.311)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 185,
+          "coverage": 0.493,
+          "longest_gap_frames": 77
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.549,
+          "player_2_coverage": 0.448,
+          "player_1_longest_gap_frames": 169,
+          "player_2_longest_gap_frames": 207,
+          "players_on_opposite_sides": false,
+          "people_detected": 37,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 55% of frames; player 1 is missing for 169 consecutive frames; player 2 is present on only 45% of frames; player 2 is missing for 207 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 8,
+          "types": {
+            "Forehand": 6,
+            "Backhand": 1,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 13,
+          "relabelled": 1,
+          "discarded_as_spurious": 4,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            130
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 2,
+          "mean": 111.2,
+          "max": 152.1,
+          "min": 70.4,
+          "segments_uncertain": 0,
+          "segments_excluded": 4,
+          "note": "Free-flight reconstruction, counting only segments that begin at a racket contact. Average over each segment, so below a radar reading at contact; drag and spin are not modelled. The dominant error is event timing: a 2.4-frame offset moves these by about 12% on average and 24% on flights under 0.5 s (eval/speed_timing_sensitivity.py). Uncertain segments are those short flights; excluded ones are post-bounce legs and any segment whose geometry says it was not a completed shot."
+        }
+      }
+    },
+    {
+      "clip_id": "H06",
+      "filename": "heldout_H06_t6700.mp4",
+      "source_start_s": 6700,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.098)",
+        "player selection failed",
+        "ball seen on 16% of frames"
+      ],
+      "elapsed_s": 182.7,
+      "summary": {
+        "generated_at": "20260827_174454",
+        "total_shots_p1": 0,
+        "total_shots_p2": 1,
+        "avg_shot_speed_p1_kmh": 0.0,
+        "avg_shot_speed_p2_kmh": 19.5,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.098,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.0,
+            0.0,
+            0.013,
+            0.022,
+            0.098,
+            0.151,
+            0.116,
+            0.111,
+            0.071,
+            0.133,
+            0.098,
+            0.187
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.098). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 59,
+          "coverage": 0.157,
+          "longest_gap_frames": 134
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.056,
+          "player_2_coverage": 0.056,
+          "player_1_longest_gap_frames": 354,
+          "player_2_longest_gap_frames": 354,
+          "players_on_opposite_sides": false,
+          "people_detected": 13,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 6% of frames; player 1 is missing for 354 consecutive frames; player 2 is present on only 6% of frames; player 2 is missing for 354 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 1,
+          "types": {
+            "Forehand": 1
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 16,
+          "relabelled": 0,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H07",
+      "filename": "heldout_H07_t7250.mp4",
+      "source_start_s": 7250,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.056)",
+        "player selection failed",
+        "ball seen on 27% of frames"
+      ],
+      "elapsed_s": 186.2,
+      "summary": {
+        "generated_at": "20260827_174801",
+        "total_shots_p1": 1,
+        "total_shots_p2": 3,
+        "avg_shot_speed_p1_kmh": 115.8,
+        "avg_shot_speed_p2_kmh": 65.0,
+        "avg_player_speed_p1_kmh": 3.3,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.056,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 4,
+          "scores": [
+            0.0,
+            0.0,
+            0.529,
+            0.516,
+            0.52,
+            0.533,
+            0.076,
+            0.062,
+            0.049,
+            0.027,
+            0.023,
+            0.0
+          ],
+          "likely_camera_cut": true,
+          "reason": "Court fit failed overall (median support 0.056), but 4 of 12 sampled frames DO show a valid court. That pattern is a clip containing camera cuts, replays or crowd shots rather than one continuous view of play. This pipeline assumes a single continuous take; trim the clip to one rally and it will analyse."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 102,
+          "coverage": 0.272,
+          "longest_gap_frames": 104
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.333,
+          "player_2_coverage": 0.333,
+          "player_1_longest_gap_frames": 184,
+          "player_2_longest_gap_frames": 184,
+          "players_on_opposite_sides": false,
+          "people_detected": 44,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 33% of frames; player 1 is missing for 184 consecutive frames; player 2 is present on only 33% of frames; player 2 is missing for 184 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 4,
+          "types": {
+            "Forehand": 3,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 12,
+          "relabelled": 2,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H08",
+      "filename": "heldout_H08_t7800.mp4",
+      "source_start_s": 7800,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.1)",
+        "player tracking degraded",
+        "ball seen on 42% of frames"
+      ],
+      "elapsed_s": 183.1,
+      "summary": {
+        "generated_at": "20260827_175103",
+        "total_shots_p1": 1,
+        "total_shots_p2": 1,
+        "avg_shot_speed_p1_kmh": 5.6,
+        "avg_shot_speed_p2_kmh": 51.6,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 22.5,
+        "court_calibrated": false,
+        "court_line_support": 0.1,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.08,
+            0.151,
+            0.12,
+            0.164,
+            0.182,
+            0.169,
+            0.209,
+            0.004,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.100). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 156,
+          "coverage": 0.416,
+          "longest_gap_frames": 31
+        },
+        "player_selection": {
+          "status": "degraded",
+          "player_1_coverage": 0.445,
+          "player_2_coverage": 0.445,
+          "player_1_longest_gap_frames": 208,
+          "player_2_longest_gap_frames": 208,
+          "players_on_opposite_sides": true,
+          "people_detected": 41,
+          "warning": "Player tracking is incomplete: player 1 is present on only 45% of frames; player 1 is missing for 208 consecutive frames; player 2 is present on only 45% of frames; player 2 is missing for 208 consecutive frames. Shots played during those stretches cannot be attributed, so the per-player counts are an under-count."
+        },
+        "shot_classification": {
+          "shots": 2,
+          "types": {
+            "Forehand": 1,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 14,
+          "relabelled": 1,
+          "discarded_as_spurious": 5,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H09",
+      "filename": "heldout_H09_t8350.mp4",
+      "source_start_s": 8350,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.167)",
+        "player selection failed",
+        "ball seen on 26% of frames"
+      ],
+      "elapsed_s": 186.0,
+      "summary": {
+        "generated_at": "20260827_175409",
+        "total_shots_p1": 1,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 8.5,
+        "avg_shot_speed_p2_kmh": 19.4,
+        "avg_player_speed_p1_kmh": 1.1,
+        "avg_player_speed_p2_kmh": 0.1,
+        "court_calibrated": false,
+        "court_line_support": 0.167,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 2,
+          "scores": [
+            0.102,
+            0.151,
+            0.169,
+            0.151,
+            0.173,
+            0.178,
+            0.164,
+            0.191,
+            0.0,
+            0.0,
+            0.489,
+            0.48
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 2 of 12 sampled frames lie on painted court lines (median support 0.167). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 99,
+          "coverage": 0.264,
+          "longest_gap_frames": 76
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.173,
+          "player_2_coverage": 0.173,
+          "player_1_longest_gap_frames": 310,
+          "player_2_longest_gap_frames": 310,
+          "players_on_opposite_sides": false,
+          "people_detected": 36,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 17% of frames; player 1 is missing for 310 consecutive frames; player 2 is present on only 17% of frames; player 2 is missing for 310 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 3,
+          "types": {
+            "Forehand": 2,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 14,
+          "relabelled": 3,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H10",
+      "filename": "heldout_H10_t8900.mp4",
+      "source_start_s": 8900,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.082)",
+        "player selection failed",
+        "ball seen on 44% of frames"
+      ],
+      "elapsed_s": 180.4,
+      "summary": {
+        "generated_at": "20260827_175710",
+        "total_shots_p1": 4,
+        "total_shots_p2": 1,
+        "avg_shot_speed_p1_kmh": 73.1,
+        "avg_shot_speed_p2_kmh": 0.0,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.082,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 4,
+          "scores": [
+            0.524,
+            0.511,
+            0.542,
+            0.587,
+            0.084,
+            0.062,
+            0.08,
+            0.079,
+            0.027,
+            0.027,
+            0.062,
+            0.142
+          ],
+          "likely_camera_cut": true,
+          "reason": "Court fit failed overall (median support 0.082), but 4 of 12 sampled frames DO show a valid court. That pattern is a clip containing camera cuts, replays or crowd shots rather than one continuous view of play. This pipeline assumes a single continuous take; trim the clip to one rally and it will analyse."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 163,
+          "coverage": 0.435,
+          "longest_gap_frames": 64
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.352,
+          "player_2_coverage": 0.165,
+          "player_1_longest_gap_frames": 243,
+          "player_2_longest_gap_frames": 262,
+          "players_on_opposite_sides": false,
+          "people_detected": 54,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 35% of frames; player 1 is missing for 243 consecutive frames; player 2 is present on only 17% of frames; player 2 is missing for 262 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 5,
+          "types": {
+            "Forehand": 3,
+            "Serve": 2
+          },
+          "serve_evidenced": 2,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 1
+        },
+        "rally_decoding": {
+          "events_kept": 15,
+          "relabelled": 2,
+          "discarded_as_spurious": 2,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H11",
+      "filename": "heldout_H11_t9450.mp4",
+      "source_start_s": 9450,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.036)",
+        "player selection failed",
+        "ball seen on 6% of frames"
+      ],
+      "elapsed_s": 188.3,
+      "summary": {
+        "generated_at": "20260827_180017",
+        "total_shots_p1": 2,
+        "total_shots_p2": 0,
+        "avg_shot_speed_p1_kmh": 7.3,
+        "avg_shot_speed_p2_kmh": 0.0,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 2.5,
+        "court_calibrated": false,
+        "court_line_support": 0.036,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.027,
+            0.031,
+            0.004,
+            0.058,
+            0.036,
+            0.027,
+            0.018,
+            0.036,
+            0.04,
+            0.076,
+            0.08,
+            0.102
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.036). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 22,
+          "coverage": 0.059,
+          "longest_gap_frames": 154
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.171,
+          "player_2_coverage": 0.189,
+          "player_1_longest_gap_frames": 156,
+          "player_2_longest_gap_frames": 164,
+          "players_on_opposite_sides": false,
+          "people_detected": 108,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 17% of frames; player 1 is missing for 156 consecutive frames; player 2 is present on only 19% of frames; player 2 is missing for 164 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 2,
+          "types": {
+            "Backhand": 1,
+            "Forehand": 1
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 8,
+          "relabelled": 0,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H12",
+      "filename": "heldout_H12_t10000.mp4",
+      "source_start_s": 10000,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL"
+      ],
+      "notes": [
+        "court fit failed (line support 0.024)",
+        "player selection failed",
+        "ball seen on 13% of frames"
+      ],
+      "elapsed_s": 188.7,
+      "summary": {
+        "generated_at": "20260827_180328",
+        "total_shots_p1": 2,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 74.2,
+        "avg_shot_speed_p2_kmh": 57.2,
+        "avg_player_speed_p1_kmh": 4.5,
+        "avg_player_speed_p2_kmh": 8.0,
+        "court_calibrated": false,
+        "court_line_support": 0.024,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.004,
+            0.013,
+            0.013,
+            0.018,
+            0.031,
+            0.031,
+            0.049,
+            0.044,
+            0.009,
+            0.013,
+            0.044,
+            0.053
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.024). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 50,
+          "coverage": 0.133,
+          "longest_gap_frames": 53
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.331,
+          "player_2_coverage": 0.325,
+          "player_1_longest_gap_frames": 251,
+          "player_2_longest_gap_frames": 251,
+          "players_on_opposite_sides": false,
+          "people_detected": 48,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 33% of frames; player 1 is missing for 251 consecutive frames; player 2 is present on only 33% of frames; player 2 is missing for 251 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "shot_classification": {
+          "shots": 4,
+          "types": {
+            "Forehand": 2,
+            "Backhand": 2
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 11,
+          "relabelled": 2,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    },
+    {
+      "clip_id": "H13",
+      "filename": "heldout_H13_t10550.mp4",
+      "source_start_s": 10550,
+      "verdict": "REFUSED",
+      "failures": [
+        "COURT",
+        "PLAYER",
+        "BALL",
+        "EVENT"
+      ],
+      "notes": [
+        "court fit failed (line support 0.133)",
+        "player selection failed",
+        "ball seen on 2% of frames",
+        "no shots detected"
+      ],
+      "elapsed_s": 182.0,
+      "summary": {
+        "generated_at": "20260827_180629",
+        "total_shots_p1": 0,
+        "total_shots_p2": 0,
+        "avg_shot_speed_p1_kmh": 0.0,
+        "avg_shot_speed_p2_kmh": 0.0,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": false,
+        "court_line_support": 0.133,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 0,
+          "scores": [
+            0.124,
+            0.138,
+            0.142,
+            0.062,
+            0.129,
+            0.138,
+            0.164,
+            0.076,
+            0.138,
+            0.147,
+            0.058,
+            0.058
+          ],
+          "likely_camera_cut": false,
+          "reason": "Court fit failed: only 0 of 12 sampled frames lie on painted court lines (median support 0.133). No part of this clip shows a court this model recognises."
+        },
+        "warning": "Court fit failed validation - speeds, distances and mini-court positions are derived from an unreliable court and should not be treated as measurements.",
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 375,
+          "frames_detected": 6,
+          "coverage": 0.016,
+          "longest_gap_frames": 122
+        },
+        "player_selection": {
+          "status": "failed",
+          "player_1_coverage": 0.373,
+          "player_2_coverage": 0.0,
+          "player_1_longest_gap_frames": 204,
+          "player_2_longest_gap_frames": 375,
+          "players_on_opposite_sides": false,
+          "people_detected": 17,
+          "warning": "Player selection failed: both selected tracks sit on the same side of the net, so at least one of them is not a player. Singles is played across the net, so this is not a close call; player 1 is present on only 37% of frames; player 1 is missing for 204 consecutive frames; player 2 is present on only 0% of frames; player 2 is missing for 375 consecutive frames. Shot counts, per-player statistics and shot attribution from this run are not measurements."
+        },
+        "rally_decoding": {
+          "events_kept": 4,
+          "relabelled": 0,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 375,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        }
+      }
+    }
+  ]
+}
