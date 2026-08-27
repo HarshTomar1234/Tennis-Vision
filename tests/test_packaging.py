@@ -130,10 +130,12 @@ def test_version_is_consistent_across_the_project():
     release. A user cannot report a bug against a version string that does not exist.
     """
     import re
-    import tomllib
 
-    with open(REPO / "pyproject.toml", "rb") as f:
-        packaged = tomllib.load(f)["project"]["version"]
+    # Regex rather than tomllib: tomllib is stdlib only from Python 3.11 and this project
+    # declares requires-python >= 3.10, so importing it here would break the floor the
+    # CI matrix exists to verify. It did, on the first run of this test.
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    packaged = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
 
     cli_source = (REPO / "cli.py").read_text(encoding="utf-8")
     cli_version = re.search(r'__version__ = "([^"]+)"', cli_source).group(1)
