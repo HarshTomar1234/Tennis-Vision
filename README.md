@@ -341,6 +341,97 @@ against is unchanged. The cost is listed rather than left out.
 It cannot recover an event that was never detected: a missing contact stays missing, and
 the audit still reports it.
 
+### Held-out benchmark
+
+Everything above this line is measured on data that influenced the system: the nine
+evaluation clips calibrated the court threshold, swept the rally deletion prior, and
+produced the frame-rate and physics figures. Numbers from them describe performance on
+data the system was fitted to.
+
+This section is different. Fourteen clips were cut from a region of source video that has
+never influenced any threshold, model choice or feature selection, and the manifest was
+frozen before a single clip was viewed. The selection rule is arithmetic and stated in
+`datasets/heldout/manifest.json`, so the set cannot have been curated. Nothing was dropped
+afterwards for looking bad.
+
+**Its limits, first.** One match, one surface, one broadcast production, two players,
+25 fps throughout. It measures generalization *within* broadcast tennis, not across
+domains, and it cannot exercise the frame-rate gate. There is no handheld, phone, clay or
+hard-court footage in it, and none was fabricated to fill the table. It has no frame-level
+ground truth, so it produces **no precision or recall figures** and none are claimed.
+
+#### Part A — arbitrary 15-second broadcast windows
+
+| Result | |
+|---|---|
+| Clips analysed | 14 |
+| **Reported numbers** | **0** |
+| **Refused** | **14** |
+| Crashes | 0 |
+| Valid `summary.json` written | 14 / 14 |
+| Fabricated positions | 0 |
+| Silent algorithm fallbacks | 0 |
+
+Every clip was refused, and that is the correct outcome. A fixed-length window cut from a
+broadcast is not one rally: it routinely contains the end of a point, a crowd shot, a
+replay and the next serve, and **this pipeline assumes a single continuous camera take.**
+Scoring court line support frame by frame shows it plainly:
+
+```
+development clip   0.44 0.48 0.53 0.56 0.57 0.61 0.65 0.65 0.62 0.69 0.73 0.59   12/12
+held-out H00       0.05 0.06 0.05 | 0.60 0.58 0.59 0.57 0.47 | 0.01 0.03 0.00 0.04  5/12
+held-out H13       0.12 0.14 0.14 0.06 0.13 0.14 0.16 0.08 0.14 0.15 0.06 0.06     0/12
+```
+
+Seven of the fourteen windows contain a real court segment with cuts either side. Seven
+never show a playable court at all.
+
+The apparent four-way failure (ball 100%, court 93%, players 71%) collapses to that one
+cause. Ball coverage on H00 is 27% across the whole window and **59% on its court segment
+alone**, against 73% on a development clip, so roughly two thirds of the ball failure was
+downstream of the cuts rather than a detector problem.
+
+**What Part A actually demonstrates** is the refusal architecture under adversarial input.
+Fourteen clips the system could not handle produced zero fabricated numbers, zero crashes,
+and a specific reason each time. Since this run, a failed court fit also says *which* kind
+of failure it is, because "5 of 12 frames do show a valid court, trim the clip" and "no
+part of this clip shows a court" need different things from the user.
+
+Reproduce with `eval/heldout_benchmark.py`; the per-clip record is committed in
+`datasets/heldout/results.json`.
+
+#### Part B — the tennis inside those windows
+
+The same frozen clips, with the court-valid segment located and analysed. Reported
+separately because "does it survive camera cuts" and "does it analyse tennis" are
+different questions, and merging them would hide both answers. Only measurements
+*downstream* of the court gate are reported, so the segment selection cannot flatter them.
+
+Five of the fourteen clips contain a court-valid segment of at least four seconds.
+
+| Clip | Segment | Court | Players | Ball | Shots | Serves | 3-D segs | Shot speed |
+|---|---|---|---|---|---|---|---|---|
+| H00 | 6.0 s | 0.558 | ok | 57% | 3 | 1 | 1 | 172 km/h |
+| H04 | 4.8 s | 0.458 | ok | 41% | 1 | 0 | 0 | unavailable |
+| H05 | 8.4 s | 0.482 | ok | 72% | 3 | 1 | 1 | 70 km/h |
+| H07 | 4.8 s | 0.502 | ok | 62% | 4 | 1 | 3 | 108-141 km/h |
+| H10 | 5.4 s | 0.542 | ok | 76% | 5 | 2 | 3 | 87-112 km/h |
+
+| Metric | Result |
+|---|---|
+| Court calibrated | **5 / 5** |
+| Player selection `ok` | **5 / 5** (no failures, no degraded) |
+| Ball coverage | median **62%**, range 41-76% |
+| Shots reported | 16 across 5 segments |
+| Serves evidenced | 5 |
+
+On footage never used for tuning, and given a continuous view of play, the court gate and
+the player gate both pass everywhere. Ball coverage runs about 11 points below the
+development clip's 73%, which is a real grass-domain gap and the honest cost of never
+having tuned on this footage.
+
+Reproduce with `eval/heldout_segments.py`.
+
 ### Reference clip, end to end
 
 One clip with 7 hand-labelled shots. Listed because it is the reproducible demo, not
@@ -586,8 +677,39 @@ recognised.
   only. The validity gate flags these rather than reporting wrong numbers.
 - **Doubles and amateur footage are untested.** Every evaluation clip is broadcast singles.
 - **Frame rates outside 23 to 31 fps are not supported.** See below.
+- **A clip containing a camera cut is refused whole.** There is no shot-boundary
+  detection, and the court gate judges the clip by its median frame. On the held-out
+  benchmark that refused 14 of 14 arbitrary broadcast windows. Trim to one rally and it
+  analyses; the refusal message says how many frames were usable.
+- **Ball coverage on unseen footage runs lower than on the development clips.** Median 62%
+  across the held-out segments against 73% on a development clip and 88.6% on the labelled
+  dataset. The three numbers measure different things and the lowest one is the one a new
+  user should expect.
 
 ## Supported inputs
+
+### One continuous take, one rally
+
+**The pipeline assumes the clip is a single uninterrupted view of play.** It has no
+shot-boundary detection, so a clip spanning a camera cut is refused as a whole even when
+part of it is a perfectly good court view.
+
+This is not a theoretical limit. The held-out benchmark cut fourteen fixed-length windows
+from a broadcast and every one was refused, because a broadcast window routinely contains
+the end of a point, a crowd reaction, a replay and the next serve. Trimmed to the rally
+inside them, five of five had a valid court and valid player selection.
+
+| Input | Status |
+|---|---|
+| One rally, continuous camera, court in view | **Supported** |
+| A clip containing a camera cut, replay or crowd shot | **Refused**, with the reason and how many frames were usable |
+| A full match | **Unsupported.** No point segmentation, and 18.5x real time makes it impractical |
+
+If a clip is refused for this reason the output says so specifically, including how many
+of the sampled frames did show a valid court, so trimming is an obvious next step rather
+than a guess.
+
+### Frame rate
 
 Every threshold in the event-detection path is counted in **frames**, and the two largest
 weights in the hit/bounce classifier are velocities in **pixels per frame**. None of it is
@@ -688,6 +810,11 @@ python eval/shot_frame_accuracy.py                  # reference clip, ships with
 python eval/speed_accuracy.py                       # reference clip, ships with repo
 python eval/rally_coherence.py                      # any clips, needs no ground truth
 python eval/speed_timing_sensitivity.py             # reads a run's own 3-D output
+python eval/player_selection_sanity.py              # no ground truth needed
+python eval/physics_evidence_rate.py                # runs the real pipeline per clip
+
+python eval/heldout_benchmark.py                    # frozen held-out set, needs the clips
+python eval/heldout_segments.py                     # the rallies inside them
 
 python eval/ball_localization_accuracy.py --clips 16          # needs dataset
 python eval/event_detection_on_real_detections.py --compare   # needs dataset
@@ -715,6 +842,13 @@ utils/                ball_state, court_validity, hit_bounce_classifier, kalman_
 main.py               pipeline entry point
 cli.py                tennis-vision command
 ```
+
+## How it works
+
+[`docs/public/TECHNICAL_OVERVIEW.md`](docs/public/TECHNICAL_OVERVIEW.md) walks the whole
+pipeline stage by stage. Every stage states what it does, why it exists, the algorithm,
+the key assumption and the failure mode, because the failure modes are the part worth
+reading.
 
 ## Notes on the CV concepts
 

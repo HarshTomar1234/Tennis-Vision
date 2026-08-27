@@ -1,0 +1,538 @@
+{
+  "manifest": "heldout-2026-09-01",
+  "segments": [
+    {
+      "clip_id": "H00",
+      "has_segment": true,
+      "span": [
+        105,
+        255
+      ],
+      "frames": 150,
+      "elapsed_s": 105.6,
+      "crashed": false,
+      "summary": {
+        "generated_at": "20260827_181021",
+        "total_shots_p1": 0,
+        "total_shots_p2": 3,
+        "avg_shot_speed_p1_kmh": 0.0,
+        "avg_shot_speed_p2_kmh": 57.8,
+        "avg_player_speed_p1_kmh": 0.6,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": true,
+        "court_line_support": 0.558,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 11,
+          "scores": [
+            0.591,
+            0.56,
+            0.556,
+            0.56,
+            0.587,
+            0.533,
+            0.533,
+            0.387,
+            0.591,
+            0.578,
+            0.373,
+            0.013
+          ],
+          "likely_camera_cut": false,
+          "reason": "11 of 12 sampled frames sit on painted court lines (median support 0.558)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 150,
+          "frames_detected": 85,
+          "coverage": 0.567,
+          "longest_gap_frames": 27
+        },
+        "player_selection": {
+          "status": "ok",
+          "player_1_coverage": 0.987,
+          "player_2_coverage": 0.987,
+          "player_1_longest_gap_frames": 2,
+          "player_2_longest_gap_frames": 2,
+          "players_on_opposite_sides": true,
+          "people_detected": 18
+        },
+        "shot_classification": {
+          "shots": 3,
+          "types": {
+            "Forehand": 2,
+            "Serve": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 4,
+          "relabelled": 1,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 150,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 1,
+          "mean": 171.6,
+          "max": 171.6,
+          "min": 171.6,
+          "segments_uncertain": 0,
+          "segments_excluded": 1,
+          "note": "Free-flight reconstruction, counting only segments that begin at a racket contact. Average over each segment, so below a radar reading at contact; drag and spin are not modelled. The dominant error is event timing: a 2.4-frame offset moves these by about 12% on average and 24% on flights under 0.5 s (eval/speed_timing_sensitivity.py). Uncertain segments are those short flights; excluded ones are post-bounce legs and any segment whose geometry says it was not a completed shot."
+        }
+      }
+    },
+    {
+      "clip_id": "H01",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H02",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H03",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H04",
+      "has_segment": true,
+      "span": [
+        255,
+        375
+      ],
+      "frames": 120,
+      "elapsed_s": 86.3,
+      "crashed": false,
+      "summary": {
+        "generated_at": "20260827_181200",
+        "total_shots_p1": 0,
+        "total_shots_p2": 1,
+        "avg_shot_speed_p1_kmh": 0.0,
+        "avg_shot_speed_p2_kmh": 52.8,
+        "avg_player_speed_p1_kmh": 0.0,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": true,
+        "court_line_support": 0.458,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 12,
+          "scores": [
+            0.444,
+            0.462,
+            0.422,
+            0.458,
+            0.444,
+            0.458,
+            0.458,
+            0.436,
+            0.476,
+            0.493,
+            0.511,
+            0.551
+          ],
+          "likely_camera_cut": false,
+          "reason": "12 of 12 sampled frames sit on painted court lines (median support 0.458)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 120,
+          "frames_detected": 49,
+          "coverage": 0.408,
+          "longest_gap_frames": 60
+        },
+        "player_selection": {
+          "status": "ok",
+          "player_1_coverage": 1.0,
+          "player_2_coverage": 1.0,
+          "player_1_longest_gap_frames": 0,
+          "player_2_longest_gap_frames": 0,
+          "players_on_opposite_sides": true,
+          "people_detected": 10
+        },
+        "shot_classification": {
+          "shots": 1,
+          "types": {
+            "Forehand": 1
+          },
+          "serve_evidenced": 0,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 3,
+          "relabelled": 1,
+          "discarded_as_spurious": 1,
+          "relabelled_over_high_confidence": 0
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 120,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 0,
+          "segments_excluded": 2,
+          "status": "unavailable",
+          "note": "No reconstructed segment began at a racket contact, so no shot speed can be reported for this clip."
+        }
+      }
+    },
+    {
+      "clip_id": "H05",
+      "has_segment": true,
+      "span": [
+        0,
+        210
+      ],
+      "frames": 210,
+      "elapsed_s": 126.6,
+      "crashed": false,
+      "summary": {
+        "generated_at": "20260827_181411",
+        "total_shots_p1": 1,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 154.0,
+        "avg_shot_speed_p2_kmh": 21.8,
+        "avg_player_speed_p1_kmh": 1.6,
+        "avg_player_speed_p2_kmh": 0.0,
+        "court_calibrated": true,
+        "court_line_support": 0.482,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 11,
+          "scores": [
+            0.524,
+            0.498,
+            0.511,
+            0.507,
+            0.471,
+            0.489,
+            0.476,
+            0.484,
+            0.48,
+            0.471,
+            0.431,
+            0.058
+          ],
+          "likely_camera_cut": false,
+          "reason": "11 of 12 sampled frames sit on painted court lines (median support 0.482)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 210,
+          "frames_detected": 151,
+          "coverage": 0.719,
+          "longest_gap_frames": 15
+        },
+        "player_selection": {
+          "status": "ok",
+          "player_1_coverage": 0.981,
+          "player_2_coverage": 0.981,
+          "player_1_longest_gap_frames": 4,
+          "player_2_longest_gap_frames": 4,
+          "players_on_opposite_sides": true,
+          "people_detected": 23
+        },
+        "shot_classification": {
+          "shots": 3,
+          "types": {
+            "Serve": 1,
+            "Groundstroke": 1,
+            "Forehand": 1
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 1
+        },
+        "rally_decoding": {
+          "events_kept": 7,
+          "relabelled": 1,
+          "discarded_as_spurious": 5,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            130
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 210,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 1,
+          "mean": 69.6,
+          "max": 69.6,
+          "min": 69.6,
+          "segments_uncertain": 0,
+          "segments_excluded": 4,
+          "note": "Free-flight reconstruction, counting only segments that begin at a racket contact. Average over each segment, so below a radar reading at contact; drag and spin are not modelled. The dominant error is event timing: a 2.4-frame offset moves these by about 12% on average and 24% on flights under 0.5 s (eval/speed_timing_sensitivity.py). Uncertain segments are those short flights; excluded ones are post-bounce legs and any segment whose geometry says it was not a completed shot."
+        }
+      }
+    },
+    {
+      "clip_id": "H06",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H07",
+      "has_segment": true,
+      "span": [
+        75,
+        195
+      ],
+      "frames": 120,
+      "elapsed_s": 73.8,
+      "crashed": false,
+      "summary": {
+        "generated_at": "20260827_181535",
+        "total_shots_p1": 2,
+        "total_shots_p2": 2,
+        "avg_shot_speed_p1_kmh": 109.9,
+        "avg_shot_speed_p2_kmh": 80.8,
+        "avg_player_speed_p1_kmh": 10.9,
+        "avg_player_speed_p2_kmh": 2.9,
+        "serve_avg_flight_speed_kmh": 117.9,
+        "court_calibrated": true,
+        "court_line_support": 0.502,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 11,
+          "scores": [
+            0.511,
+            0.493,
+            0.467,
+            0.516,
+            0.484,
+            0.502,
+            0.498,
+            0.507,
+            0.529,
+            0.502,
+            0.56,
+            0.089
+          ],
+          "likely_camera_cut": false,
+          "reason": "11 of 12 sampled frames sit on painted court lines (median support 0.502)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 120,
+          "frames_detected": 75,
+          "coverage": 0.625,
+          "longest_gap_frames": 19
+        },
+        "player_selection": {
+          "status": "ok",
+          "player_1_coverage": 0.967,
+          "player_2_coverage": 0.967,
+          "player_1_longest_gap_frames": 4,
+          "player_2_longest_gap_frames": 4,
+          "players_on_opposite_sides": true,
+          "people_detected": 13
+        },
+        "shot_classification": {
+          "shots": 4,
+          "types": {
+            "Backhand": 1,
+            "Serve": 1,
+            "Forehand": 2
+          },
+          "serve_evidenced": 1,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 7,
+          "relabelled": 2,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            25
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 120,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 3,
+          "mean": 125.8,
+          "max": 140.8,
+          "min": 108.1,
+          "segments_uncertain": 0,
+          "segments_excluded": 3,
+          "note": "Free-flight reconstruction, counting only segments that begin at a racket contact. Average over each segment, so below a radar reading at contact; drag and spin are not modelled. The dominant error is event timing: a 2.4-frame offset moves these by about 12% on average and 24% on flights under 0.5 s (eval/speed_timing_sensitivity.py). Uncertain segments are those short flights; excluded ones are post-bounce legs and any segment whose geometry says it was not a completed shot."
+        }
+      }
+    },
+    {
+      "clip_id": "H08",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H09",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H10",
+      "has_segment": true,
+      "span": [
+        0,
+        135
+      ],
+      "frames": 135,
+      "elapsed_s": 79.5,
+      "crashed": false,
+      "summary": {
+        "generated_at": "20260827_181702",
+        "total_shots_p1": 2,
+        "total_shots_p2": 3,
+        "avg_shot_speed_p1_kmh": 76.7,
+        "avg_shot_speed_p2_kmh": 48.8,
+        "avg_player_speed_p1_kmh": 5.2,
+        "avg_player_speed_p2_kmh": 0.3,
+        "serve_avg_flight_speed_kmh": 72.7,
+        "court_calibrated": true,
+        "court_line_support": 0.542,
+        "court_detail": {
+          "sampled": 12,
+          "passed": 11,
+          "scores": [
+            0.547,
+            0.556,
+            0.538,
+            0.502,
+            0.493,
+            0.547,
+            0.569,
+            0.489,
+            0.498,
+            0.573,
+            0.582,
+            0.093
+          ],
+          "likely_camera_cut": false,
+          "reason": "11 of 12 sampled frames sit on painted court lines (median support 0.542)"
+        },
+        "frame_rate_support": {
+          "fps": 25.0,
+          "status": "supported",
+          "measured_range_fps": [
+            23.0,
+            31.0
+          ],
+          "reason": "25.0 fps is inside the 23 to 31 fps range every published accuracy number was measured on."
+        },
+        "ball": {
+          "frames": 135,
+          "frames_detected": 103,
+          "coverage": 0.763,
+          "longest_gap_frames": 7
+        },
+        "player_selection": {
+          "status": "ok",
+          "player_1_coverage": 0.978,
+          "player_2_coverage": 0.978,
+          "player_1_longest_gap_frames": 3,
+          "player_2_longest_gap_frames": 3,
+          "players_on_opposite_sides": true,
+          "people_detected": 19
+        },
+        "shot_classification": {
+          "shots": 5,
+          "types": {
+            "Forehand": 3,
+            "Serve": 2
+          },
+          "serve_evidenced": 2,
+          "physics_evidenced": 0,
+          "physics_downgraded_to_groundstroke": 0
+        },
+        "rally_decoding": {
+          "events_kept": 8,
+          "relabelled": 3,
+          "discarded_as_spurious": 0,
+          "relabelled_over_high_confidence": 1,
+          "high_confidence_frames": [
+            128
+          ],
+          "warning": "The rally grammar overruled the per-event classifier on 1 event(s) where it was at least 86% confident. A grammar repairing an uncertain call is the intended behaviour; repairing confident ones repeatedly means the candidate that forced the repair was probably never an event, or the classifier is wrong on this footage. Treat the event sequence on this clip with more caution than the headline recall figure implies."
+        },
+        "calibration": {
+          "coordinate_mapping": "homography",
+          "frames_total": 135,
+          "frames_using_fallback_mapping": 0,
+          "positions_unmappable_and_omitted": 0
+        },
+        "shot_speed_3d_kmh": {
+          "segments": 3,
+          "mean": 96.8,
+          "max": 111.6,
+          "min": 87.3,
+          "segments_uncertain": 0,
+          "segments_excluded": 4,
+          "note": "Free-flight reconstruction, counting only segments that begin at a racket contact. Average over each segment, so below a radar reading at contact; drag and spin are not modelled. The dominant error is event timing: a 2.4-frame offset moves these by about 12% on average and 24% on flights under 0.5 s (eval/speed_timing_sensitivity.py). Uncertain segments are those short flights; excluded ones are post-bounce legs and any segment whose geometry says it was not a completed shot."
+        }
+      }
+    },
+    {
+      "clip_id": "H11",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H12",
+      "has_segment": false
+    },
+    {
+      "clip_id": "H13",
+      "has_segment": false
+    }
+  ]
+}
