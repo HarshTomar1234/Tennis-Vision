@@ -324,3 +324,26 @@ def test_full_pipeline_smoke(tmp_path):
     # Output video must exist and be > 0 bytes
     assert os.path.exists(out_video), "Output video not created"
     assert os.path.getsize(out_video) > 0, "Output video is empty"
+
+
+# ─────────────────────────────────────────────────────────────────
+# The stats HUD must not print a NaN at the viewer
+# ─────────────────────────────────────────────────────────────────
+#
+# Caught on a launch demo frame: player 2 had not hit yet, so the stats frame carried NaN
+# for their shot type, and formatting it straight into the panel printed the literal
+# string "nan" on screen. A rendered frame is what gets screenshotted and shared, and
+# "nan" reads as a broken measurement rather than an absent one. Every other absent value
+# in this project is shown as absent.
+
+@pytest.mark.parametrize("absent", [float("nan"), None, "", "nan", "NaN", "None"])
+def test_absent_shot_type_renders_as_a_dash(absent):
+    from utils.player_stats_drawer_utils import _shot_type_or_dash
+    assert _shot_type_or_dash(absent) == "-"
+
+
+@pytest.mark.parametrize("real", ["Serve", "Forehand", "Backhand", "Groundstroke"])
+def test_a_real_shot_type_is_passed_through(real):
+    """The guard must not swallow genuine labels."""
+    from utils.player_stats_drawer_utils import _shot_type_or_dash
+    assert _shot_type_or_dash(real) == real

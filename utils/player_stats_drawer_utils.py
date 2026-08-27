@@ -1,6 +1,17 @@
 import numpy as np
 import cv2
 
+def _shot_type_or_dash(value) -> str:
+    """A shot type for display, or an em-free dash when the player has not hit yet."""
+    if value is None:
+        return "-"
+    text = str(value).strip()
+    # pandas puts NaN in the column until the player's first shot; str(nan) is "nan".
+    if not text or text.lower() in ("nan", "none"):
+        return "-"
+    return text
+
+
 def draw_player_stats(output_video_frames, player_stats, layout_params=None):
     """
     Draw player statistics overlay on video frames.
@@ -27,9 +38,15 @@ def draw_player_stats(output_video_frames, player_stats, layout_params=None):
         avg_player_1_speed = row['player_1_average_player_speed']
         avg_player_2_speed = row['player_2_average_player_speed']
 
-        # Get shot types if available
-        player_1_shot_type = row.get('player_1_shot_type', 'N/A')
-        player_2_shot_type = row.get('player_2_shot_type', 'N/A')
+        # Get shot types if available.
+        #
+        # A player who has not hit yet has no shot type, and the stats frame carries NaN
+        # for that. Formatting it straight into the panel printed the literal string
+        # "nan" on screen, which reads as a broken measurement rather than as an absent
+        # one. Every other absent value in this project is shown as absent, so this is
+        # too: "-" means nothing has happened yet, and it cannot be mistaken for data.
+        player_1_shot_type = _shot_type_or_dash(row.get('player_1_shot_type'))
+        player_2_shot_type = _shot_type_or_dash(row.get('player_2_shot_type'))
 
         frame = output_video_frames[index]
         frame_height, frame_width = frame.shape[:2]
