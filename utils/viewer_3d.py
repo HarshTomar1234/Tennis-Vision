@@ -50,6 +50,19 @@ SURFACE_COLOURS = {
 }
 
 
+def _basename(path: str | None) -> str | None:
+    """
+    Final path component, regardless of which OS wrote the path.
+
+    `Path(...).name` resolves separators for the HOST os only, so it silently returns the
+    entire string for a Windows path on Linux. The viewer references its video by relative
+    name, so getting this wrong emits an absolute path into an html src.
+    """
+    if not path:
+        return None
+    return str(path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or None
+
+
 def _segment_evidence(t, fps: float) -> list[str]:
     """
     The measured facts behind one displayed segment.
@@ -814,9 +827,16 @@ def build_viewer(
             "post_outside": NET_POST_OUTSIDE_M,
         },
         "segments": segments,
-        # Only the file name: an absolute Windows path would be escaped into a src
-        # that some browsers refuse, and the page is meant to sit beside its video.
-        "video": Path(video_path).name if video_path else None,
+        # Only the file name: an absolute path would be escaped into a src that some
+        # browsers refuse, and the page is meant to sit beside its video.
+        #
+        # Split on BOTH separators rather than using Path().name, which only understands
+        # the separator of the host OS. A Windows path handed to a Linux process keeps its
+        # backslashes and Path("D:\clips.mp4").name returns the whole string, so the
+        # viewer would emit an absolute path as its src. CI caught exactly that: the
+        # behaviour is correct on the platform that wrote the path and wrong everywhere
+        # else, which is invisible on a single-OS machine.
+        "video": _basename(video_path),
         "court_valid": bool(court_valid),
         "players": players_m if (players_m and court_valid) else None,
         "fps": round(float(fps), 3) if fps else 0.0,

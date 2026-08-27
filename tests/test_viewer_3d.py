@@ -162,9 +162,26 @@ class TestRobustness:
         html = out.read_text(encoding="utf-8")
         assert "</script><script>alert" not in html
 
-    def test_absolute_video_path_is_reduced_to_a_name(self, tmp_path):
+    @pytest.mark.parametrize("given", [
+        r"D:\some\where\clip.mp4",     # Windows absolute
+        "/home/u/clips/clip.mp4",       # POSIX absolute
+        "./relative/clip.mp4",
+        r"\server\share\clip.mp4",     # UNC
+        "clip.mp4",                     # already bare
+    ])
+    def test_video_path_is_reduced_to_a_name(self, tmp_path, given):
+        """
+        The viewer references its video by relative name, so an absolute path in the src
+        is a broken page.
+
+        Parametrised across separator styles because the original implementation used
+        Path().name, which resolves separators for the HOST os only: a Windows path on
+        Linux kept its backslashes and the whole string came through as the "name". That
+        passed on the machine it was written on and failed in CI on Ubuntu, which is the
+        signature of a portability bug rather than a logic one.
+        """
         out = build_viewer([make_trajectory()], tmp_path / "v.html", FPS,
-                           video_path=r"D:\some\where\clip.mp4")
+                           video_path=given)
         assert embedded_data(out.read_text(encoding="utf-8"))["video"] == "clip.mp4"
 
     def test_nan_fails_loudly_rather_than_silently(self, tmp_path):
