@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "2.1.0"
 
 
 def _cmd_analyze(argv: list[str]) -> int:

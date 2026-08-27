@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tennis-vision"
-version = "0.1.0"
+version = "2.1.0"
 description = "Measured, reproducible tennis video analysis: ball tracking, court homography, player tracking and shot classification from a single camera."
 readme = "README.md"
 requires-python = ">=3.10"

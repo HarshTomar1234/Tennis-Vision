@@ -119,3 +119,31 @@ def test_runtime_dependencies_are_declared(package):
     """
     pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     assert package in pyproject, f"{package} is required at runtime but not declared"
+
+
+def test_version_is_consistent_across_the_project():
+    """
+    pyproject, the CLI and the CHANGELOG must agree.
+
+    They did not: both pyproject and cli.py said 0.1.0 while the CHANGELOG and the git
+    tags were on 2.x, so `tennis-vision version` reported a number that matched no
+    release. A user cannot report a bug against a version string that does not exist.
+    """
+    import re
+    import tomllib
+
+    with open(REPO / "pyproject.toml", "rb") as f:
+        packaged = tomllib.load(f)["project"]["version"]
+
+    cli_source = (REPO / "cli.py").read_text(encoding="utf-8")
+    cli_version = re.search(r'__version__ = "([^"]+)"', cli_source).group(1)
+
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    latest_release = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.M).group(1)
+
+    assert packaged == cli_version, (
+        f"pyproject says {packaged}, cli.py says {cli_version}"
+    )
+    assert packaged == latest_release, (
+        f"pyproject says {packaged}, newest CHANGELOG entry is {latest_release}"
+    )
