@@ -360,7 +360,7 @@ domains, and it cannot exercise the frame-rate gate. There is no handheld, phone
 hard-court footage in it, and none was fabricated to fill the table. It has no frame-level
 ground truth, so it produces **no precision or recall figures** and none are claimed.
 
-#### Part A — arbitrary 15-second broadcast windows
+#### Part A - arbitrary 15-second broadcast windows
 
 | Result | |
 |---|---|
@@ -400,7 +400,7 @@ part of this clip shows a court" need different things from the user.
 Reproduce with `eval/heldout_benchmark.py`; the per-clip record is committed in
 `datasets/heldout/results.json`.
 
-#### Part B — the tennis inside those windows
+#### Part B - the tennis inside those windows
 
 The same frozen clips, with the court-valid segment located and analysed. Reported
 separately because "does it survive camera cuts" and "does it analyse tennis" are

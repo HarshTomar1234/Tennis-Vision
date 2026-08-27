@@ -11,57 +11,159 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [2.1.0] - 2026-09-01
+
+21 commits. A hardening release, not a feature release. Every change here either removes a
+way the pipeline could report something it had not measured, or makes an existing
+measurement checkable by someone else.
+
+The headline is not a new capability. It is that the system was run against footage it had
+never been tuned on, refused all fourteen clips, and was right to.
 
 ### Added
 
-- **Constrained rally decoding** (`utils/rally_decode.py`). The hit/bounce classifier
-  labels each event in isolation, so its errors compound into rallies that cannot happen:
-  the self-audit found one player hitting five times in succession on the reference clip.
-  A rally is a grammar, and the classifier emits probabilities rather than hard labels, so
-  the most likely labelling that obeys the grammar is a Viterbi decode. It relabels events
-  the ordering rules out, and discards candidates that have no legal place at all.
+**Gates. Each one closes a route to a confident wrong number.**
 
-  Measured across the 9 eval clips, events the audit proves are missing fall from 83 to 35
-  at the shipped setting, with contact recall on 40 labelled dataset clips unchanged at
-  75.9%. Ten of ten clips improved and none got worse.
+- **Frame-rate support gate** (`utils/fps_support.py`). Every threshold in the event path
+  is counted in frames and the classifier's two largest weights are velocities in pixels
+  per frame, none of it normalised by rate, and the entire measured record sits between
+  23.6 and 30 fps. Resampling the reference clip's ball track and re-running the real
+  generators gives the bands: 15 fps loses 43% of events per second, 60 fps finds 64% more
+  and swings the contact/bounce split from 14:14 to 11:35. Supported 23-31, partially
+  supported 18-50, unsupported outside, reported in the log, `summary.json` and a banner on
+  the rendered video. The clip still runs; the caveat travels with it.
 
-  It cannot recover an event that was never detected, and does not try. The audit metric
-  says the reported rally is coherent, not that every discarded candidate was spurious,
-  which is why it is only ever quoted next to the recall it cost.
+- **Player-selection quality gate** (`utils/player_selection.assess_selection`). The court
+  gate stops a clip whose COURT was fitted to the crowd. Nothing stopped a clip whose
+  PLAYERS were. One evaluation clip passes the court gate at 0.327 line support and then
+  selects two tracks on the same side of the net, one present for 40% of frames with a
+  199-frame hole, and the run published confident per-player statistics. Singles is played
+  across the net, so that is decidable with no ground truth. Reports `ok`, `degraded`
+  (right players, lost for a stretch, so counts under-count) or `failed` (wrong people, so
+  nothing per-player is a measurement).
 
-- `utils/player_selection.py`, the two-player selection `main.py` was doing inline, now
-  shared so the evals grade the same players the pipeline reports on.
+- **3-D speed validity** (`utils/trajectory_3d.classify_segment_speed`). Only a segment
+  that begins at a racket contact is a ball leaving a racket; one beginning at a bounce is
+  the post-bounce leg travelling to the receiver. Segments are labelled `valid`,
+  `plausible_but_uncertain`, `outlier` or `not_a_shot`, and a speed is published only for
+  the first two.
+
+- **Court-fit failure detail** (`assess_court_fit_detail`). A clip containing a good court
+  segment and a clip that never shows a court both failed as "court fit failed". Only one
+  of those is something a user can fix, so the failure now names which it is and how many
+  frames were usable.
+
+**Evidence in the output**
+
+- `summary.json` gains `frame_rate_support`, `player_selection`, `court_detail`, `ball`,
+  `rally_decoding` and `shot_classification` blocks, each carrying a plain-language reason.
+- `trajectory3d_*.json` gains `speed_status`, `speed_status_reason` and `duration_s`.
+- Rally-decoder overrides are surfaced. The decoder's own docstring warns that repeatedly
+  overruling a confident classifier signals an upstream problem; on the reference clip it
+  overrules at 90% and 94%, and that warning previously reached nobody.
+
+**Measurement**
+
+- `eval/speed_timing_sensitivity.py`, `eval/physics_evidence_rate.py`,
+  `eval/player_selection_sanity.py`, `eval/heldout_benchmark.py`,
+  `eval/heldout_segments.py`.
+- **Held-out benchmark.** Fourteen clips cut from a region of source video that never
+  influenced any threshold, model choice or feature selection, frozen before any clip was
+  viewed, selected by an arithmetic rule stated in `datasets/heldout/manifest.json`.
+
+**Infrastructure**
+
+- `.github/workflows/ci.yml`: tests on Python 3.10 and 3.12, CPU torch, editable install,
+  plus a narrow lint. The suite had only ever passed on one machine.
+- `docs/public/TECHNICAL_OVERVIEW.md`, the pipeline stage by stage with the assumption and
+  failure mode of each.
+- `scripts/build_demo_pack.py`, demo assets assembled from a real run, with key frames
+  chosen from the run's own event list.
+- Measured runtime published: 5 m 51 s fresh for 19 s of 720p on a GTX 1050 Ti, 18.5x real
+  time. No real-time claim is made.
 
 ### Fixed
 
-- The rally grammar's same-player rule did not survive an intervening bounce, so
-  `hit(far), bounce, hit(far)` was accepted. That describes a ball that never crossed the
-  net.
+**Numbers that were wrong**
 
-- The decoder deleted every event preceding a sequence with no legal continuation, because
-  that branch rebuilt the path from scratch instead of extending it. One clip decoded 22
-  events down to 1. Unreachable at any non-zero deletion prior, since NOISE always supplies
-  a legal continuation, so it only surfaced when the prior was swept to 0.
+- **The final contact of every clip was dropped.** `ShotClassifier.classify_shots` and
+  `main.py`'s statistics loop both iterated `range(len - 1)`, so the published shot count
+  was always exactly one below the number of contacts detected and drawn. Reference clip:
+  14 published against 15 detected, now 15 and 15.
+- **An unmappable position became the centre of the court**, and flowed into player
+  distance and speed as though it had been observed. Now omitted and counted.
+- **An unmapped opponent contributed a 0.0 km/h movement sample**, biasing that average
+  downward exactly where tracking was worst. Now no sample is recorded.
+- **A failed homography silently substituted the nearest-keypoint approximation**, the
+  method this project describes as the old and wrong one. Now counted and reported.
+- **Requesting the SAM 3D pose backend without its weights fell through to MediaPipe in
+  silence.** The two measure 85.5% and 66.4% balanced on identical clips.
 
-- `eval/shot_frame_accuracy.py` fed every detected person into event derivation rather
-  than the two players. On the reference clip that is fourteen people, so the ids reaching
-  the decoder included spectators and the eval was grading a strictly worse input than the
-  product ships.
+**Failures that could not be seen**
+
+- **A truncated run poisoned the detection cache.** `--max-frames` cached its detections
+  under the full clip's name, and the end-to-end smoke test runs that way, so running
+  `pytest tests/` was enough to leave a 40-frame cache at a 570-frame clip's path.
+  `tools/label_shots.py` had no length guard and would have seeded ground-truth labelling
+  from the wrong input, silently.
+- **The 3-D viewer emitted an absolute video path on non-Windows hosts.** `Path().name`
+  resolves separators for the host OS only, so a Windows path on Linux came through whole
+  and the video failed to load. Found by CI on its first run.
+- **The stats panel printed the literal string "nan"** where a player had not hit yet.
+- A `numpy.bool_` in the player-selection payload truncated `summary.json` mid-write.
+- `get_center_of_bbox` was defined twice in `utils/bbox_utils.py`.
+- The pre-commit hook ran `ruff --select=F --fix`, which on the re-export module
+  `utils/__init__.py` would have deleted the re-exports and broken the package.
+- `pytest.ini` was gitignored, so a fresh clone had no marker registration. Configuration
+  moved into `pyproject.toml` with `--strict-markers`.
+- Thirty comments in tracked files cited paths under the private `docs/` tree, so a reader
+  following them found nothing.
+
+### Changed
+
+- **`shot_speed_3d_kmh` counts only contact-initiated segments.** Reference clip: was 25
+  segments spanning 18-170 km/h with a mean of 80.4, now 13 shots spanning 62-153 km/h with
+  a mean of 91.6 and 12 segments excluded and counted.
+- **The physics shot layer is described as a validation filter, not a classifier.** Across
+  9 clips and 81 shots it evidences 1 and rejects 20. Its rejection logic is unchanged:
+  rarely firing positively is correct when volleys and smashes are rare.
+- **`trajectory_3d.py`'s stated limits are reordered by measured size.** Event timing
+  dominates at 12.5% mean and 28.0% worst, against 0.7% for contact height and 0.1% for
+  ball localization. The list previously named the small terms and omitted the large one.
 
 ### Measured and rejected
 
-- **Relabelling-only decoding.** The first version could repair an impossible ordering
-  only by flipping a label. It measured worse than not decoding at all: false positives 7
-  to 10, no recall gain. Not a tuning problem. Every repair pushes an event into the other
-  class, which is only correct when each candidate is a real event, and on this clip 41%
-  of them are. Fixed by letting the grammar discard a candidate as well as relabel it.
-
+- **Relabelling-only rally decoding.** Repairing an impossible ordering only by flipping a
+  label measured worse than not decoding at all: false positives 7 to 10, no recall gain.
+  Every repair pushes an event into the other class, which is only correct when each
+  candidate is a real event, and on this clip 41% are not.
 - **A deletion prior above 0.02.** Chosen as 0.15 at first, from a flat region on the
-  labelled reference clip. The 40-clip recall curve showed that clip saturates early and
-  the flatness was an artefact: recall falls monotonically with the prior, so 0.15 was
-  giving up 2.6 points of recall (75.9% to 73.3%) for no additional coherence. At 0.50
-  every candidate decodes to noise and recall reaches zero.
+  reference clip. The 40-clip recall curve showed that clip saturates early: recall falls
+  monotonically with the prior, so 0.15 gave up 2.6 points of recall for no additional
+  coherence.
+- **A minimum-speed threshold on 3-D segments.** The obvious fix for an 18 km/h "shot
+  speed", and the wrong one. Three explanations were tested against the data first:
+  endpoints outside the baseline (refuted, 18 of 25 segments have one, because a contact
+  endpoint is the player's feet), never crossing the net (true, and not a defect), and
+  aggregating legs that are not shots (the real cause).
+
+### Known limitation, newly measured
+
+- **A clip containing a camera cut is refused whole.** There is no shot-boundary detection
+  and the pipeline assumes one continuous take. The held-out benchmark refused 14 of 14
+  arbitrary broadcast windows for this reason. Trimmed to the rally inside them, 5 of 5 had
+  a valid court and valid player selection. Automatic segmentation is deliberately not in
+  this release.
+
+### Benchmark summary
+
+| | |
+|---|---|
+| Held-out, arbitrary broadcast windows | 14 clips, **0 numbers reported, 14 refused** |
+| Held-out, the rally inside them | 5 analysable, court **5/5**, players **5/5**, ball median **62%** |
+| Output integrity across all 14 | 0 crashes, 14/14 valid JSON, 0 fabricated positions, 0 silent fallbacks |
+| Reference clip | 7/7 shot recall, 8 false positives, F1 0.636, unchanged |
+| Tests | 244 to **383** |
 
 ---
 

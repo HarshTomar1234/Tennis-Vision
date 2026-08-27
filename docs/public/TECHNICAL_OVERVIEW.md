@@ -1,4 +1,4 @@
-# Tennis-Vision — Technical Overview
+# Tennis-Vision - Technical Overview
 
 How the pipeline actually works, stage by stage, for someone reading the code for the
 first time or deciding whether to trust its output.
@@ -67,7 +67,7 @@ as a measurement.
 **Why** Every threshold in the event path is in frames, and the classifier's two largest
 weights are velocities in **pixels per frame**. Nothing is normalised by rate, so the same
 tennis sampled faster or slower produces a different event set. Every clip this project
-has measured on runs 23.6–30 fps, so the entire evidence base sits in one narrow band and
+has measured on runs 23.6-30 fps, so the entire evidence base sits in one narrow band and
 until this gate existed nothing said so.
 
 **Algorithm** Threshold comparison against bands derived by resampling a reference clip's
@@ -75,13 +75,13 @@ ball track and re-running the real generators over it:
 
 | fps | events/s | vs 30 fps | contact : bounce |
 |---|---|---|---|
-| 15 | 0.84 | −43% | 10 : 6 |
-| 24 | 1.37 | −7% | 15 : 11 |
+| 15 | 0.84 | -43% | 10 : 6 |
+| 24 | 1.37 | -7% | 15 : 11 |
 | **30** | **1.47** | baseline | **14 : 14** |
 | 50 | 2.21 | +50% | 15 : 27 |
 | 60 | 2.42 | +64% | 11 : 35 |
 
-Supported 23–31, partially supported 18–50, unsupported outside.
+Supported 23-31, partially supported 18-50, unsupported outside.
 
 **Assumption** The reference clip's event density is representative of tennis generally.
 
@@ -102,14 +102,14 @@ identity across frames, not just detection.
 
 **Algorithm** YOLOv8x for detection, ByteTrack for association. ByteTrack matches
 detections to existing tracks by IoU, and its distinguishing idea is that it also tries to
-match the *low-confidence* detections rather than discarding them — which is what keeps a
+match the *low-confidence* detections rather than discarding them - which is what keeps a
 partially-occluded player's track alive.
 
 **Assumption** People are visible and separable enough for box-overlap association to work.
 
-**Failure mode** Broadcast tennis puts 12–50 people in frame: players, ball kids, line
+**Failure mode** Broadcast tennis puts 12-50 people in frame: players, ball kids, line
 judges, the umpire, the crowd. Detection is not the hard part and a bigger detector does
-not help — measured, and recorded in the README's rejected experiments. Choosing which two
+not help - measured, and recorded in the README's rejected experiments. Choosing which two
 are the players is the hard part, which is the next stage.
 
 ---
@@ -121,14 +121,14 @@ are the players is the hard part, which is the next stage.
 **Why** A tennis ball is a few pixels across, travels up to 200 km/h, motion-blurs into a
 streak and disappears behind players and the net. A single-frame detector fails on it.
 
-**Algorithm** TrackNet v2 — a VGG-style encoder/decoder taking **three consecutive frames
+**Algorithm** TrackNet v2 - a VGG-style encoder/decoder taking **three consecutive frames
 stacked channel-wise** (9 channels in) and emitting a per-pixel heatmap. The temporal stack
 is the whole idea: a smear that is ambiguous in one frame is obvious as motion across
 three. The heatmap is reduced to a position by taking the centroid of the **largest
 connected component**, not the mean of all responding pixels.
 
-That distinction is worth its own note. When the heatmap responds in two places — the ball
-plus a line marking, or a distant shoe — the mean lands *between* them, at a point the ball
+That distinction is worth its own note. When the heatmap responds in two places - the ball
+plus a line marking, or a distant shoe - the mean lands *between* them, at a point the ball
 never occupied. Measured against the dataset's own labels:
 
 | postprocess | detection rate | within 5px | median | p90 |
@@ -143,7 +143,7 @@ two-blob frames rather than of general smoothing.
 
 **Failure mode** **Detection rate is not accuracy, and the gap is large.** 88.6% of frames
 get a position; only 42.5% of visible-ball frames are within 5px of the true centre. That
-bounds every speed and landing position downstream. It does *not* cost event recall —
+bounds every speed and landing position downstream. It does *not* cost event recall -
 the funnel shows every labelled contact has a detected ball nearby.
 
 ---
@@ -152,7 +152,7 @@ the funnel shows every labelled contact has a detected ball nearby.
 
 **What** Locates 14 known court points in every frame.
 
-**Why** Everything real-world — position, distance, speed — needs a mapping from pixels to
+**Why** Everything real-world - position, distance, speed - needs a mapping from pixels to
 metres, and that mapping is defined by the court.
 
 **Algorithm** ResNet-50 with a regression head predicting 28 numbers (14 x,y pairs),
@@ -164,7 +164,7 @@ median keypoint error 4.03px → **2.90px**.
 
 **Failure mode** **The model has no way to say "I don't recognise this."** It is a
 regression head: given any image it returns 14 numbers. On unfamiliar footage it returns a
-tidy quadrilateral that simply is not the court — often on the crowd. Everything
+tidy quadrilateral that simply is not the court - often on the crowd. Everything
 downstream then computes confidently from it. This is the single most dangerous failure in
 the system, which is why the next stage exists.
 
@@ -184,9 +184,9 @@ the **line support score**. Below `MIN_LINE_SUPPORT = 0.22` the fit is rejected 
 dependent measurement is withheld.
 
 **What does not work, and this is the instructive part.** Homography reprojection error is
-useless here. Measured across 9 clips it ranged 1.40–1.88px on correct fits and 2.13px on a
+useless here. Measured across 9 clips it ranged 1.40-1.88px on correct fits and 2.13px on a
 visibly wrong one, with 14/14 RANSAC inliers every time. It measures whether the 14 points
-are *self-consistent* — and a tidy quadrilateral on the stands is perfectly
+are *self-consistent* - and a tidy quadrilateral on the stands is perfectly
 self-consistent. Only evidence from the image itself distinguishes them.
 
 **Assumption** Court lines are brighter than their surroundings. True on hard, clay and
@@ -209,7 +209,7 @@ one winner per court half. Aggregating over time is the key: in any single frame
 judge can outscore a real player, but players are present for most of a rally and
 incidental people are not.
 
-Selecting from frame zero was the original approach and it failed on real footage — on one
+Selecting from frame zero was the original approach and it failed on real footage - on one
 clip the true player is a track id that does not exist at frame zero, because they were
 off-screen at the serve.
 
@@ -233,8 +233,8 @@ completed and published confident per-player statistics.
 **Algorithm** Three checks, none of which needs any ground truth:
 - **Opposite sides of the net.** Singles is played across the net, so two tracks on one
   half cannot both be players. Decisive on its own.
-- **Coverage** — share of frames each player is present.
-- **Longest continuous gap** — because ten scattered misses and one 200-frame hole have the
+- **Coverage** - share of frames each player is present.
+- **Longest continuous gap** - because ten scattered misses and one 200-frame hole have the
   same average and are completely different problems.
 
 `failed` means the wrong people were selected and nothing per-player is a measurement.
@@ -243,7 +243,7 @@ distinction matters and is reported.
 
 **Assumption** Singles, and a court fit good enough to locate the net line.
 
-**Failure mode** Doubles would fail it by construction, correctly — doubles is untested and
+**Failure mode** Doubles would fail it by construction, correctly - doubles is untested and
 unsupported.
 
 ---
@@ -260,7 +260,7 @@ different real distances for the same pixel displacement.
 with RANSAC fits it while discarding outlier keypoints. Cached per unique keypoint tuple,
 since consecutive frames often predict identically.
 
-**Assumption — and this is the one that matters most.** A homography is only valid **on
+**Assumption - and this is the one that matters most.** A homography is only valid **on
 the plane it was fitted to**, which here is the court floor. Everything not on the floor is
 mapped wrongly, and the error grows with height.
 
@@ -271,7 +271,7 @@ entirely. This is why ball positions are only trusted at floor level (stage 11) 
 3-D reconstruction exists (stage 18).
 
 If the homography cannot be fitted at all, the code falls back to a nearest-keypoint
-approximation that cannot correct perspective. That fallback is **counted and reported** —
+approximation that cannot correct perspective. That fallback is **counted and reported** -
 it used to happen silently, which meant a run could quietly degrade to a materially
 different algorithm and still report its numbers with full confidence.
 
@@ -287,17 +287,17 @@ The critical path. Everything after it depends on getting these frames right.
 
 **Algorithm** Three generators feeding a union, because each is blind to a different event
 shape:
-- **y-reversal** — the ball changes vertical direction. Catches most contacts and bounces.
-- **x-velocity** — a sharp change in horizontal velocity. Catches contacts that redirect
+- **y-reversal** - the ball changes vertical direction. Catches most contacts and bounces.
+- **x-velocity** - a sharp change in horizontal velocity. Catches contacts that redirect
   the ball sideways without reversing it vertically. Alone it recalls *worse* than
   y-reversal (70.3% vs 76.0%); the **union** recalls 87.7%.
-- **bounce generator** — dedicated, because x-velocity recalls only 12% of bounces.
+- **bounce generator** - dedicated, because x-velocity recalls only 12% of bounces.
 
 Then `merge_nearby_candidates` collapses duplicates, since two generators firing on one
 real event would otherwise double-count it.
 
 **Failure mode** The merge window is a fixed number of frames, and it is the largest
-remaining source of loss: **16.5% of contacts are lost in merging** — real events that are
+remaining source of loss: **16.5% of contacts are lost in merging** - real events that are
 genuinely closer together in time than the window. A further 15.4% are never proposed by
 any generator.
 
@@ -310,7 +310,7 @@ any generator.
 **Algorithm** Logistic regression on four trajectory-shape features: ball height, |vertical
 velocity change|, |horizontal velocity change|, and whether the horizontal direction
 flipped. The last one carries the physics: **a bounce is a floor reflection and mostly
-preserves horizontal velocity; a racket redirects it.** Measured — hits flip x-direction
+preserves horizontal velocity; a racket redirects it.** Measured - hits flip x-direction
 71.8% of the time, bounces 2.1%.
 
 **86.4% held-out accuracy**, split by *clip* rather than by event, so camera, lighting and
@@ -330,7 +330,7 @@ and serve mismatch: the dataset's velocities come from hand-annotated positions,
 pipeline computes them from real detections with interpolated gaps.
 
 **Failure mode** Features are in pixels per frame and are not normalised for resolution or
-frame rate — the reason stage 2's gate exists.
+frame rate - the reason stage 2's gate exists.
 
 ### 10c · Rally decoding `utils/rally_decode.py`
 
@@ -339,7 +339,7 @@ each event in isolation.
 
 **Why** The classifier labels events independently at 86.4%, so roughly one in seven is
 wrong. Independently that is respectable. In a *sequence* it is not, because the errors
-compound into rallies that cannot physically happen — the self-audit found one player
+compound into rallies that cannot physically happen - the self-audit found one player
 hitting five times in succession.
 
 **Algorithm** A rally is a grammar:
@@ -353,7 +353,7 @@ bounce        → bounce          IMPOSSIBLE, a second bounce ends the point
 ```
 
 The classifier emits a *probability*, not a hard label. Finding the most likely labelling
-that obeys a grammar is exactly **Viterbi decoding** — the same technique that repairs
+that obeys a grammar is exactly **Viterbi decoding** - the same technique that repairs
 character errors in OCR, applied to a sport. State is (last label, which side last struck
 the ball).
 
@@ -382,7 +382,7 @@ overrides are counted and warned about rather than absorbed silently.
 means at a bounce or at a contact. In between, the ball has real height and must be
 *interpolated between anchors*, not projected.
 
-**Algorithm** A constant-velocity Kalman filter — predict position from the last position
+**Algorithm** A constant-velocity Kalman filter - predict position from the last position
 and velocity, correct with the measurement, weighted by relative uncertainty.
 
 **Failure mode, measured and instructive.** Forward-backward RTS smoothing was implemented
@@ -390,7 +390,7 @@ and **deliberately not enabled**: it buys complete coverage and ~1.5 points of r
 4% worse median error. Two findings came out of it. Smoothing *across* a contact is
 measurably worse, because a racket changes velocity discontinuously and a constant-velocity
 smoother blends the incoming and outgoing velocities. And even per-flight it does not
-improve median error, because TrackNet's error is not Gaussian — a 5.4px median against an
+improve median error, because TrackNet's error is not Gaussian - a 5.4px median against an
 18.0px p90 is a heavy tail of gross mislocalizations, and a Kalman smoother *spreads* those
 into neighbouring good frames instead of rejecting them.
 
@@ -406,7 +406,7 @@ a wrong track.
 **What** Identifies which contacts are serves, from physical evidence.
 
 **Why** The original rule was "the first shot in a sequence is a serve." That only holds if
-a clip begins exactly at the start of a point, and real clips are cut from mid-match — so
+a clip begins exactly at the start of a point, and real clips are cut from mid-match - so
 every "Serve" the pipeline ever reported was that heuristic firing, not a serve being
 recognised.
 
@@ -428,12 +428,12 @@ Rare, and the rally position usually disambiguates.
 never had ground truth and produced smashes in the middle of baseline rallies.
 
 **Algorithm**
-- **Smash** — struck above the head but *not* from a baseline (the serve test, zone
+- **Smash** - struck above the head but *not* from a baseline (the serve test, zone
   inverted).
-- **Volley** — **no bounce between it and the previous contact.** Volleying is by
+- **Volley** - **no bounce between it and the previous contact.** Volleying is by
   definition hitting before the bounce, so this is a fact about the event sequence rather
   than an inference from position.
-- **Lob** — 3-D apex far above net height.
+- **Lob** - 3-D apex far above net height.
 
 **What it turns out to be.** Measured across 9 clips and 81 shots: **1 positively
 evidenced, 20 downgraded.** A 20-to-1 rejection ratio. On broadcast rallies almost nothing
@@ -454,17 +454,17 @@ fake a volley. The position clause is a guard against exactly that.
 whether the hitting arm crosses the shoulder midline horizontally. Body-relative makes it
 independent of handedness, facing, and which side of the court the player is on.
 
-**Failure mode — and this is honestly the weakest part of the system.** It scores **54%**
+**Failure mode - and this is honestly the weakest part of the system.** It scores **54%**
 against ground truth, barely above chance on a two-class problem, and predicts forehand 89%
-of the time. It is accurate on forehands (87–100%) and fails on backhands (0–47%).
+of the time. It is accurate on forehands (87-100%) and fails on backhands (0-47%).
 
 The cause is upstream and more specific than "pose fails". MediaPipe finds the player on
-**100%** of frames and then omits the landmarks of the *occluded arm* — which on a backhand
-is the racket arm, missing 44–58% of the time. Both the rule and any classifier built on it
+**100%** of frames and then omits the landmarks of the *occluded arm* - which on a backhand
+is the racket arm, missing 44-58% of the time. Both the rule and any classifier built on it
 are reading a hand that is often not there.
 
 Three approaches have been measured and rejected: the geometric rule (54%), a trained
-classifier (76.3% on indoor THETIS footage, **53.6% on broadcast** — the transfer failed),
+classifier (76.3% on indoor THETIS footage, **53.6% on broadcast** - the transfer failed),
 and a stronger pose model (SAM 3D Body, **66.4% against MediaPipe's 85.5% on identical
 clips**). The last one is the most interesting: SAM 3D recovers the occluded arm by
 inferring it from a body prior, and that inference destroys exactly the signal that decides
@@ -491,7 +491,7 @@ away travels √(18² + 2.7²) = 18.2 m.
 **The gate:** the bounce must land **inside the correct service box**. The hit/bounce
 classifier is ~86% accurate, so roughly one "bounce" in seven is not one, and a mid-flight
 point used instead projects metres away. Measured: one such point inflated a flight to
-26.6 m where a serve travels ~18 m — the whole of a 31% error against radar.
+26.6 m where a serve travels ~18 m - the whole of a 31% error against radar.
 
 **Validated against broadcast radar**, which is third-party ground truth:
 
@@ -500,7 +500,7 @@ point used instead projects metres away. Measured: one such point inflated a fli
 | 1 | 213.4 km/h | 214.0 km/h |
 | 2 | 164.1 km/h | 177.0 km/h |
 
-Mean ratio 0.96, always at or below radar — which is what drag predicts, since radar reads
+Mean ratio 0.96, always at or below radar - which is what drag predicts, since radar reads
 at contact and this is an average over the flight.
 
 **Failure mode** Reported as **average flight speed**, never as a radar-equivalent contact
@@ -521,7 +521,7 @@ about the video you just uploaded has answered the wrong question.
 **Algorithm** Tennis has enough structure to answer the right one. Where an *impossible*
 ordering appears, an event was missed, and that can be stated without knowing the correct
 sequence:
-1. A player cannot hit twice in succession — the opponent's contact between them was missed.
+1. A player cannot hit twice in succession - the opponent's contact between them was missed.
 2. A ball cannot bounce twice with play continuing.
 3. Two contacts with no bounce between them is legal only near the net (a volley), so it is
    flagged softly when the hitter was deep.
@@ -542,12 +542,12 @@ geometry error.
 
 **Algorithm** Between two events the ball is in free flight: horizontal motion constant,
 vertical motion parabolic. If both endpoints and the flight time are known, the trajectory
-is **fully determined** — a two-point boundary value problem with a closed-form solution:
+is **fully determined** - a two-point boundary value problem with a closed-form solution:
 
 ```
-vx  = (x1 − x0) / T
-vy  = (y1 − y0) / T
-vz0 = (z1 − z0 + ½gT²) / T        from  z(T) = z0 + vz0·T − ½gT²
+vx  = (x1 - x0) / T
+vy  = (y1 - y0) / T
+vz0 = (z1 - z0 + ½gT²) / T        from  z(T) = z0 + vz0·T - ½gT²
 ```
 
 No fitting, no initial guess, no convergence risk.
@@ -567,7 +567,7 @@ leaving a racket. One that begins at a bounce is the post-bounce leg travelling 
 receiver: real geometry, correctly reconstructed, and not a shot. On the reference clip, 25
 segments reconstruct, of which 13 are shots, 11 are post-bounce legs and 1 is an outlier.
 
-**Failure mode, ordered by measured size** — and the ordering was surprising:
+**Failure mode, ordered by measured size** - and the ordering was surprising:
 
 | source of error | mean | median | worst |
 |---|---|---|---|
@@ -575,7 +575,7 @@ segments reconstruct, of which 13 are shots, 11 are post-bounce legs and 1 is an
 | contact height (±0.20 m) | 0.7% | 0.2% | 3.5% |
 | ball localization (±0.09 m) | 0.1% | 0.1% | 0.7% |
 
-Event timing dominates by roughly 18× over contact height, and scales as 1/T — flights
+Event timing dominates by roughly 18× over contact height, and scales as 1/T - flights
 under 0.5 s average 23.9% sensitivity, over 1.0 s average 6.5%. A reconstructed speed is
 about as accurate as the event detector is *punctual*, and no amount of better geometry
 improves it. **Drag and spin are not modelled**, and adding them would be modelling the
@@ -618,18 +618,18 @@ this codebase:
 - requesting the SAM 3D pose backend without its weights fell through to MediaPipe in
   silence, despite the two measuring 85.5% and 66.4% on identical clips.
 
-All three now omit, count and report. That pattern — *measure it, gate it, say so* — is
+All three now omit, count and report. That pattern - *measure it, gate it, say so* - is
 what the project is actually for.
 
 ---
 
 ## Reading order for the code
 
-1. `main.py` — the orchestration, top to bottom.
-2. `utils/hit_bounce_classifier.py` — `derive_shot_frames` is where the shot numbers come
+1. `main.py` - the orchestration, top to bottom.
+2. `utils/hit_bounce_classifier.py` - `derive_shot_frames` is where the shot numbers come
    from.
-3. `utils/rally_decode.py` — the most interesting algorithm here.
-4. `utils/court_validity.py` and `utils/player_selection.py` — the two gates that decide
+3. `utils/rally_decode.py` - the most interesting algorithm here.
+4. `utils/court_validity.py` and `utils/player_selection.py` - the two gates that decide
    whether anything is reported at all.
-5. `utils/trajectory_3d.py` — the physics and its measured uncertainty.
-6. `eval/` — every number in the README traces to a script here.
+5. `utils/trajectory_3d.py` - the physics and its measured uncertainty.
+6. `eval/` - every number in the README traces to a script here.
