@@ -103,6 +103,15 @@ models/*.txt
 # Both spellings of the eval-clip directory (the typo'd one predates the rename).
 datasets/eval_clips/
 
+# Held-out launch benchmark. The CLIPS are third-party broadcast footage and are not
+# redistributed, exactly like every other clip directory here. The MANIFEST and the
+# RESULTS are the reproducible part and are tracked deliberately: the manifest states the
+# arithmetic selection rule and the frozen timestamps, so anyone with the source video
+# can rebuild the identical set and check the numbers against results.json.
+datasets/heldout/clips/
+!datasets/heldout/manifest.json
+!datasets/heldout/results.json
+
 # Pipeline output and scratch analysis — generated, not source.
 output_videos/
 analysis/

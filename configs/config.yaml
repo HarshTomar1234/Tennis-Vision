@@ -21,7 +21,8 @@ models:
   ball: "models/last.pt"
   # Geometrically fine-tuned (translation/scale/perspective/flip). Beat the original
   # weights on BOTH gates: in-distribution val median 4.03 -> 2.90 px, and real-clip
-  # court fits 4/9 -> 8/9 passing. See docs/specs/05_clip_suite_hardening.md.
+  # court fits 4/9 -> 8/9 passing. Reproduce with eval/court_keypoint_accuracy.py
+  # and eval/court_validity_calibration.py.
   # Original weights kept at models/keypoints_model.pth for comparison.
   court: "models/keypoints_model_geoaug.pth"
   tracknet: "models/tracknet.pt"    # download: gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt

@@ -10,7 +10,7 @@ Two independent classifications, for two different jobs:
    player hit the ball or it bounced off the court. The floor homography is valid at
    *both*, so this split needs no further disambiguation - it only needs to separate
    "ball is at floor level, project it" from "ball is airborne, interpolate between
-   anchors instead." See docs/journal/0003 for why contact-vs-bounce is NOT required
+   anchors instead." See this module's classify_floor_level for why contact-vs-bounce is NOT required
    for this and why three tuning attempts at splitting them were abandoned.
 
 2. CONTACT vs BOUNCE (secondary, best-effort) - for shot counting / stats, where a
@@ -69,7 +69,7 @@ def classify_contact_vs_bounce(
     Best-effort split of reversal frames into (contacts, bounces) by player proximity.
 
     Measured ceiling: ~5/7 real shots correctly identified on the reference clip
-    (docs/journal/0003_contact_vs_bounce_dead_end_2026-07-29.md). Proximity alone
+    on our own footage, measured at roughly 5 correct in 7. Proximity alone
     cannot cleanly separate contact from bounce because of the frame offset between a
     detected reversal and the true contact instant, and because players are
     continuously near the ball throughout a rally. Use for approximate shot counting,

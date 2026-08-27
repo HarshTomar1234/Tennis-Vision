@@ -8,9 +8,10 @@ datasets/
 
 ## external/tracknet_original/
 
-Original TrackNet tennis dataset (Huang et al. 2019, arXiv:1907.03698). Pulled
-2026-07-31 - see `docs/specs/phase_3_labeled_dataset.md` for why, and
-`docs/journal/0009`/`0010` for the full research and re-test trail.
+Original TrackNet tennis dataset (Huang et al. 2019, arXiv:1907.03698). Pulled because
+this project needed ball positions labelled by someone other than us: every event-detection
+number in the README is measured against these coordinates rather than against our own
+annotations, which is what makes them checkable by a third party.
 
 - **Source:** https://github.com/yastrebksv/TrackNet (unofficial reimplementation repo,
   links to the original Google Drive dataset release)
@@ -59,5 +60,6 @@ external/tracknet_original/
 
 ## labels/
 
-Our own labels, produced with `tools/label_shots.py`. See
-`docs/specs/phase_3_labeled_dataset.md` for the schema.
+Our own labels, produced with `tools/label_shots.py`, which also documents the schema
+and the labelling conventions. See `tools/LABELLING_GUIDE.md` for how a shot type or an
+ambiguous event should be called.

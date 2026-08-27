@@ -18,7 +18,7 @@ Split by SUBJECT, not by clip: THETIS has 2-3 repetitions per subject per action
 clips from the same subject share body proportions and swing habits, so a clip-level
 split would leak information the same way an event-level split did for hit/bounce.
 
-Domain caveat (see docs/journal): THETIS is isolated indoor-gym demonstration footage,
+Domain caveat: THETIS is isolated indoor-gym demonstration footage,
 not broadcast match play -- this measures whether the feature/model works on THETIS's
 own held-out subjects, not whether it transfers to our own footage. That transfer is
 unverified and should be tested before this is wired into main.py.

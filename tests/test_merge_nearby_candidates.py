@@ -1,7 +1,7 @@
 """
 tests/test_merge_nearby_candidates.py
 Unit tests for merge_nearby_candidates -- collapses duplicate detections of the same
-real event from the union of two independent candidate generators (docs/journal/0018).
+real event from the union of two independent candidate generators.
 """
 import os
 import sys

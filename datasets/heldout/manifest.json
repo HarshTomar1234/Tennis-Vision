@@ -1,0 +1,197 @@
+{
+  "name": "heldout-2026-09-01",
+  "frozen_at": "2026-08-27T16:23:33",
+  "frozen_before_any_analysis": true,
+  "selection_rule": "t = 3400 + i * 550 for i in 0..13, each 15s long. Arithmetic and fixed in advance. No clip was viewed before selection, and none is dropped afterwards for being unattractive.",
+  "source": {
+    "file": "datasets/source_videos/2L06HxxP1jM.mp4",
+    "video_id": "2L06HxxP1jM",
+    "match": "Alcaraz v Djokovic, Wimbledon 2024 final",
+    "duration_min": 185.0,
+    "fps": 25.0,
+    "resolution": "1280x720"
+  },
+  "contamination_control": {
+    "tuning_used_timestamps_s": [
+      900,
+      1500,
+      2100,
+      2700,
+      3300
+    ],
+    "held_out_region_s": [
+      3400,
+      10565
+    ],
+    "margin_after_last_tuned_s": 100,
+    "never_used_for": [
+      "threshold tuning",
+      "model selection",
+      "feature selection",
+      "prior sweeps",
+      "gate calibration"
+    ]
+  },
+  "known_limitations": [
+    "SINGLE MATCH. One surface (grass), one broadcast production, one camera setup, two players. This measures generalization WITHIN broadcast tennis, not across domains.",
+    "25 fps throughout, which sits inside the supported 23-31 band, so this benchmark cannot exercise the frame-rate gate. That gate remains validated only by the resampling measurement in utils/fps_support.py.",
+    "No handheld, phone, static-amateur, clay or hard-court footage exists on this machine. Diversity was not fabricated to fill the table.",
+    "No frame-level ground truth. Event precision/recall cannot be computed here; those numbers stay sourced from the labelled TrackNet dataset."
+  ],
+  "clips": [
+    {
+      "clip_id": "H00",
+      "filename": "heldout_H00_t3400.mp4",
+      "source_start_s": 3400,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H01",
+      "filename": "heldout_H01_t3950.mp4",
+      "source_start_s": 3950,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H02",
+      "filename": "heldout_H02_t4500.mp4",
+      "source_start_s": 4500,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H03",
+      "filename": "heldout_H03_t5050.mp4",
+      "source_start_s": 5050,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H04",
+      "filename": "heldout_H04_t5600.mp4",
+      "source_start_s": 5600,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H05",
+      "filename": "heldout_H05_t6150.mp4",
+      "source_start_s": 6150,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H06",
+      "filename": "heldout_H06_t6700.mp4",
+      "source_start_s": 6700,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H07",
+      "filename": "heldout_H07_t7250.mp4",
+      "source_start_s": 7250,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H08",
+      "filename": "heldout_H08_t7800.mp4",
+      "source_start_s": 7800,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H09",
+      "filename": "heldout_H09_t8350.mp4",
+      "source_start_s": 8350,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H10",
+      "filename": "heldout_H10_t8900.mp4",
+      "source_start_s": 8900,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H11",
+      "filename": "heldout_H11_t9450.mp4",
+      "source_start_s": 9450,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H12",
+      "filename": "heldout_H12_t10000.mp4",
+      "source_start_s": 10000,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    },
+    {
+      "clip_id": "H13",
+      "filename": "heldout_H13_t10550.mp4",
+      "source_start_s": 10550,
+      "duration_s": 15,
+      "expected_fps": 25.0,
+      "expected_resolution": "1280x720",
+      "camera_type": "broadcast",
+      "surface": "grass",
+      "content": "UNKNOWN AT FREEZE TIME"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ Two jobs, both from the same filter:
    speed without depending on correctly identifying discrete shot events. This turned
    out to matter more than expected: speed_accuracy.py was failing because the
    distance-between-two-shot-frames approach is only as good as shot-event detection
-   (measured ceiling ~5/7 - see docs/journal/0003 and 0004). Kalman velocity sidesteps
+   (measured ceiling ~5/7 on our own footage). Kalman velocity sidesteps
    that entirely by estimating speed continuously from the whole trajectory.
 
 Uses cv2.KalmanFilter (already a dependency via opencv-python) rather than adding
@@ -138,7 +138,7 @@ def peak_speed_kmh_near_frame(
     detections and reported 371.7 km/h for a groundstroke. This isn't specific to that
     clip or to the candidate that triggered it: raw per-frame detection noise near an
     event frame can happen on any input, so `max_realistic_kmh` lets a caller reject the
-    result rather than pass tracking noise off as a measurement (see docs/journal/0015,
+    result rather than pass tracking noise off as a measurement (see
     same "drop don't guess" convention as classify_reversals_by_trajectory).
 
     Args:

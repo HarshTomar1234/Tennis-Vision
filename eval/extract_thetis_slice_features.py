@@ -3,7 +3,7 @@ eval/extract_thetis_slice_features.py
 ────────────────────────────────────────
 Runs our own MediaPipe PoseEstimator on downloaded THETIS clips (datasets/external/
 thetis/VIDEO_RGB/) and saves per-frame upper-body landmark sequences to JSON, for
-training a slice-vs-flat/topspin classifier (docs/journal, phase_2_pose_shots.md
+training a slice-vs-flat/topspin classifier (
 "Beyond rules" gap).
 
 Why our own extractor, not THETIS's shipped "skeleton" videos: THETIS's VIDEO_Skelet2D/

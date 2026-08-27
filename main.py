@@ -257,7 +257,8 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                fps_support: dict | None = None,
                rally_decoding: dict | None = None,
                shot_classification: dict | None = None,
-               player_selection: dict | None = None):
+               player_selection: dict | None = None,
+               ball: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
     out.mkdir(exist_ok=True)
@@ -302,6 +303,11 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
         # measured on. Every event threshold here is counted in frames, so this is a
         # precondition for those numbers applying at all, not a footnote.
         summary["frame_rate_support"] = fps_support
+    if ball:
+        # Raw detector coverage, before interpolation. Everything downstream is built on
+        # it, so a consumer reading an event count needs to know how much of the clip the
+        # detector actually saw the ball in.
+        summary["ball"] = ball
     if player_selection:
         # Whether the two tracks the whole report is about could plausibly be the two
         # players. Everything per-player downstream depends on this and nothing else
@@ -563,6 +569,21 @@ def main():
     logger.info(f"  Raw detections: {raw_detected}/{total} frames "
                 f"({100 * raw_detected / total:.1f}%)")
 
+    # Longest run of frames with no ball at all. The coverage average hides the shape of
+    # the loss: scattered misses interpolate cleanly, one long hole does not, and every
+    # event inside it is unrecoverable. Reported for the same reason the player gate
+    # reports its longest gap.
+    ball_longest_gap = _run = 0
+    for _d in ball_detections:
+        _run = 0 if _d.get(1) else _run + 1
+        ball_longest_gap = max(ball_longest_gap, _run)
+    ball_stats = {
+        "frames": total,
+        "frames_detected": raw_detected,
+        "coverage": round(raw_detected / total, 3) if total else 0.0,
+        "longest_gap_frames": ball_longest_gap,
+    }
+
     logger.info("  Interpolating missing positions...")
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
 
@@ -667,7 +688,7 @@ def main():
     # bounce) is a valid homography anchor - the floor transform is correct at floor
     # level regardless of which caused it. In-flight frames interpolate between
     # anchors instead of being projected (wrong - the ball has real height while
-    # airborne). See utils.ball_state and docs/journal/0003 for why contact-vs-bounce
+    # airborne). See utils.ball_state for why contact-vs-bounce
     # is NOT needed for this part.
     floor_states = classify_floor_level(raw_reversal_frames, len(video_frames))
 
@@ -711,7 +732,7 @@ def main():
     # Kalman smoothing (Phase 1, Step 3) - stabilizes the projected dots frame to
     # frame (João's feedback) and gives continuous velocity for the shot-speed stat
     # below, instead of depending on distance between two possibly-noisy shot-frame
-    # detections. See docs/journal/0004.
+    # detections. See utils/kalman_smoother.py.
     logger.info("  Smoothing positions with Kalman filter...")
     player_mini_court, _player_velocities = smooth_trajectories(player_mini_court)
     ball_mini_court, ball_velocities       = smooth_trajectories(ball_mini_court)
@@ -816,7 +837,7 @@ def main():
         # Serve, Volley and Smash keep their existing rules - those are genuine physical
         # signatures (overhead reach, net proximity). Forehand vs backhand was the one
         # label with no real basis in position data, so that is the only one replaced.
-        # See utils/pose_shot_classifier.py and docs/journal/0006.
+        # See utils/pose_shot_classifier.py.
         if cfg["pipeline"].get("use_pose_shots", False):
             # Optional SAM 3D Body backend, tried first when configured. It matters for
             # exactly one thing: MediaPipe finds the player on every frame and then omits
@@ -993,7 +1014,7 @@ def main():
 
         # Ball shot speed = peak Kalman velocity near the contact frame - matches how
         # real speed guns measure it (at/near contact), not averaged over the whole
-        # flight between two shot-frame detections. See docs/journal/0004.
+        # flight between two shot-frame detections. See utils/kalman_smoother.py.
         ball_speed_kmh = peak_speed_kmh_near_frame(
             ball_velocities, frame=start_frame, entity_id=1, window=5,
             px_to_m_scale=px_to_m_scale, fps=fps,
@@ -1398,6 +1419,7 @@ def main():
                fps_support=fps_support.as_dict(),
                rally_decoding=decode_diagnostics or None,
                player_selection=selection.as_dict(),
+               ball=ball_stats,
                shot_classification={
                    "shots": len(shot_classifications),
                    "types": dict(Counter(v["shot_type"]

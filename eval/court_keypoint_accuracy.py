@@ -9,7 +9,8 @@ Measured against the held-out validation split of the TennisCourtDetector datase
 the same dataset lineage our weights came from, so treat the headline number as an
 in-distribution ceiling, not evidence of generalisation. The eval-suite clips in
 `datasets/evail_clips/` are the out-of-distribution check, and they already tell a
-harsher story (see docs/specs/05_clip_suite_hardening.md).
+harsher story: see eval/court_validity_calibration.py, which scores real clips rather
+than held-out dataset images.
 
 Surface breakdown
 -----------------

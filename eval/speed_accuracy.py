@@ -87,9 +87,9 @@ def evaluate(video_path: str) -> dict:
 
     # Floor-level-anchored ball projection (Phase 1): only trust the homography at
     # trajectory reversals (contact/bounce), interpolate in between. See
-    # utils.ball_state and docs/journal/0003 for why this replaces raw per-frame
+    # utils.ball_state for why this replaces raw per-frame
     # projection, which is geometrically wrong while the ball is airborne.
-    # matches main.py: union of y-reversal + x-velocity candidates, merged (docs/journal/0018)
+    # matches main.py: union of y-reversal + x-velocity candidates, then merged
     raw_reversals = merge_nearby_candidates(
         sorted(set(ball_tracker.get_ball_shot_frames(ball_dets)) | set(detect_xvelocity_candidates(ball_dets)))
     )
@@ -113,7 +113,7 @@ def evaluate(video_path: str) -> dict:
     # Kalman-smoothed ball trajectory (Phase 1, Step 3): gives continuous velocity
     # instead of depending on distance-between-two-shot-events, which was the actual
     # cause of the earlier FAIL (event detection ceiling ~5/7, not ball geometry -
-    # see docs/journal/0004). Ball "shot speed" = peak velocity in a small window
+    # see utils/kalman_smoother.py). Ball "shot speed" = peak velocity in a small window
     # around the contact frame, matching how real speed guns measure it (at/near
     # contact, not averaged over the whole flight).
     _ball_smoothed, ball_velocities = smooth_trajectories(ball_mini)
@@ -124,7 +124,7 @@ def evaluate(video_path: str) -> dict:
 
     for sf in shot_frames:
         # matches main.py: reject physically unrealistic peaks (tracking noise, not a
-        # real shot) instead of reporting them -- see docs/journal/0015.
+        # real shot) instead of reporting them.
         speed = peak_speed_kmh_near_frame(
             ball_velocities, frame=sf, entity_id=1, window=5,
             px_to_m_scale=px_to_m_scale, fps=fps,

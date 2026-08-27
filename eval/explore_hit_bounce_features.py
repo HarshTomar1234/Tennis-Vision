@@ -2,7 +2,7 @@
 eval/explore_hit_bounce_features.py
 ────────────────────────────────────
 Feature exploration for hit-vs-bounce classification, using the real 1,030-event
-TrackNet ground truth (see docs/journal/0010, 0011).
+TrackNet ground truth.
 
 Physical hypotheses to test before committing to any model (ladder-thinking - check
 what actually separates the classes before reaching for anything more than the simplest

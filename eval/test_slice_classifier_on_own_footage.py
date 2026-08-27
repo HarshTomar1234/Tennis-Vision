@@ -2,7 +2,7 @@
 eval/test_slice_classifier_on_own_footage.py
 ────────────────────────────────────────────────
 Applies the THETIS-trained slice classifier (models/slice_classifier.json,
-docs/journal/0024) to real shots on our own footage -- both input videos -- to see
+eval/train_slice_classifier.py) to real shots on our own footage -- both input videos -- to see
 whether the domain gap flagged in 0024 is really structural, or was partly an artifact
 of the earlier sanity check's own bug (that check reused ONE frame's player bbox across
 a 40-frame window instead of tracking the player per-frame, which would starve pose

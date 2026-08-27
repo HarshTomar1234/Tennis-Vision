@@ -2,7 +2,7 @@
 tests/test_pose_estimator.py
 Unit tests for the pure-math part of PoseEstimator - bbox padding and frame-boundary
 clamping. detect_in_bbox itself needs a real model + real image data (already validated
-empirically against real footage in docs/journal/0013 - the 0.45 padding value below is
+empirically against real footage - the 0.45 padding value below is
 measured, not a round-number guess).
 """
 import os

@@ -75,7 +75,7 @@ class PoseEstimator:
                             regressing any frame that already worked at 0.15; 0.60 pulled
                             in enough background/other-player noise to break one of those.
                             0.45 is the measured sweet spot, not a round-number guess -
-                            see docs/journal/0013 for the sweep.
+                            measured by sweep against real footage.
         """
         self.model_path     = model_path
         self.min_visibility = min_visibility

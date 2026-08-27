@@ -400,8 +400,7 @@ class MiniCourt:
         So: project directly at floor-level frames, and linearly interpolate the
         mini-court position for in-flight frames between the surrounding floor-level
         anchors. This draws the ball's true ground track instead of a geometrically
-        invalid airborne scatter (see docs/journal/0003 and João's feedback in
-        docs/reference/APPROACH.md - "only project ball for floor bounces or player
+        invalid airborne scatter ("only project the ball for floor bounces or player
         hits"). Frames before the first anchor or after the last hold at that anchor
         (no extrapolation).
 

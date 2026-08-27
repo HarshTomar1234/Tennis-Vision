@@ -8,8 +8,8 @@ position needed.
 Why this exists
 ----------------
 The player-proximity heuristic in classify_contact_vs_bounce has a measured ~5/7 ceiling
-on our own footage (docs/journal/0003) that turned out to be mostly an artifact of an
-incomplete ground truth, not the heuristic itself (docs/journal/0010, 0011) - but while
+on our own footage that turned out to be mostly an artifact of an
+incomplete ground truth, not the heuristic itself - but while
 investigating that, feature exploration on the real 1,034-event TrackNet ground truth
 (eval/explore_hit_bounce_features.py) found a much stronger, complementary signal:
 
@@ -253,7 +253,7 @@ def merge_nearby_candidates(candidates: list[int], min_gap: int = 10) -> list[in
     own reference clip this inflated the apparent shot count from 7 (y-reversal only,
     journal 0012) to 22 (union, journal 0015) -- most of the "extra" shots turned out to
     be duplicate detections of the same handful of real events, not new false events
-    (see docs/journal/0018's frame-by-frame check). It also made downstream per-frame
+    (verified frame by frame). It also made downstream per-frame
     work (pose classification) sensitive to *which* nearby frame got checked: contact
     happens at one instant, so a candidate a few frames off has different wrist
     positions than the true contact frame, and pose can succeed on one cluster member
@@ -351,7 +351,8 @@ def classify_reversals_by_trajectory(
     proximity - no player detection needed. See module docstring for why: 84.1% held-out
     accuracy on real data, vs the proximity heuristic's measured ~5/7 ceiling on our own
     footage (which turned out to be mostly an incomplete-ground-truth artifact, but the
-    trajectory signal is independently strong regardless - see docs/journal/0012).
+    trajectory signal is independently strong regardless - see
+    eval/train_hit_bounce_classifier.py).
 
     Frames where the classifier can't reach a decision (not enough trajectory context,
     or the weights aren't trained) are dropped from both lists rather than guessed.
