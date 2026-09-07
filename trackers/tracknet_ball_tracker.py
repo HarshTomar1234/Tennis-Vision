@@ -10,7 +10,7 @@ Architecture: yastrebksv/TrackNet (BallTrackerNet)
 
 ── Download pretrained weights ──────────────────────────────────────────────
   pip install gdown
-  gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
+  gdown 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
 
 ── Activate in config.yaml ──────────────────────────────────────────────────
   pipeline:
@@ -143,7 +143,7 @@ class TrackNetBallTracker:
             logger.warning(
                 f"TrackNet weights not found at '{self.model_path}'.\n"
                 "  Download:  pip install gdown && "
-                "gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt\n"
+                "gdown 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt\n"
                 "  Then set:  pipeline.use_tracknet: true  in config.yaml"
             )
             return

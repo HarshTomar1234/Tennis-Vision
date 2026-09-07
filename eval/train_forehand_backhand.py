@@ -209,7 +209,7 @@ def main():
     print("(this last table is in-sample and only shows which strokes remain hard)")
 
     if all_score > RULE_ACCURACY + 0.05 and not args.no_save:
-        Path("models").mkdir(exist_ok=True)
+        Path("models").mkdir(parents=True, exist_ok=True)
         Path(WEIGHTS_PATH).write_text(json.dumps({
             "feature_names": names,
             "mu": mu.tolist(), "sigma": sd.tolist(),

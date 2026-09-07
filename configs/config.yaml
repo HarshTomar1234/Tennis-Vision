@@ -25,7 +25,7 @@ models:
   # and eval/court_validity_calibration.py.
   # Original weights kept at models/keypoints_model.pth for comparison.
   court: "models/keypoints_model_geoaug.pth"
-  tracknet: "models/tracknet.pt"    # download: gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
+  tracknet: "models/tracknet.pt"    # download: gdown 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt
   # download: curl -L -o models/pose_landmarker_lite.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
   pose: "models/pose_landmarker_lite.task"
   sam3d_body: "models/sam3d_body"

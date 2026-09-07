@@ -46,7 +46,7 @@ def pipeline_ball_detections(
               f"{len(frames)} - ignoring stale cache, detecting fresh")
 
     detections = tracker.detect_frames(frames)
-    stub_path.parent.mkdir(exist_ok=True)
+    stub_path.parent.mkdir(parents=True, exist_ok=True)
     with open(stub_path, "wb") as f:
         pickle.dump(detections, f)
     return tracker, detections

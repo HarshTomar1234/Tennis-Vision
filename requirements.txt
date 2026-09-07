@@ -23,7 +23,10 @@ mediapipe>=1.0.0
 # TrackNet weights, which we point at rather than rehost. Both are required by
 # scripts/download_models.py, i.e. by the documented first-run path.
 huggingface-hub>=0.20.0
-gdown>=4.7.1
+# gdown 5 removed the --id flag; the documented command uses the positional form,
+# which 4.x does not accept. Pinning the floor to 5 keeps the printed instruction and
+# the installed tool in agreement.
+gdown>=5.0.0
 
 # Broadcast transfer test only (eval/validate_on_broadcast_images.py).
 # Note: roboflow pulls in opencv-python-headless, which has no GUI functions and

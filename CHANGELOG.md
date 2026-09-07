@@ -11,6 +11,44 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.1.1] - 2026-09-07
+
+Two defects that broke the documented first-run path for every new user, and were
+invisible to everyone who already had the project working. Found by cloning the published
+tag and following the README Quickstart verbatim, which nobody had done.
+
+### Fixed
+
+- **The documented TrackNet fetch command did not work.** `gdown` 5 removed the `--id`
+  flag, and the dependency floor was `>=4.7.1`, so a new user installed 6.x and the
+  command the tool itself prints failed with `unrecognized arguments: --id`. It is the
+  only manual step in the install, and it was a dead end. Corrected to the positional
+  form in all four places it appears, and the floor is pinned to `gdown>=5` so the
+  printed instruction and the installed tool cannot disagree again.
+
+- **The pipeline crashed after finishing the analysis, without writing anything.**
+  `save_stats` called `out.mkdir(exist_ok=True)`, which does not create parent
+  directories. `output/` is gitignored, so it exists on every developer machine and on no
+  user's. The documented command ran the full pipeline for six minutes, completed the
+  analysis, and then died with `FileNotFoundError` on `output/stats`. Every `mkdir` in the
+  tree now creates parents.
+
+### Verified
+
+The published Quickstart, run end to end from a clean clone of the tag with weights
+downloaded fresh: 5 m 56 s, all five outputs written, and every figure identical to the
+development machine (15 shots as 8 and 7, court line support 0.638, ball coverage 82%,
+13 shot segments spanning 61.5 to 153.3 km/h with a mean of 91.6, serve speed correctly
+refused). Output JSON is strictly valid with no NaN.
+
+### Tests
+
+3 added: the documented `gdown` command against the pinned floor, output directories
+created from nothing, and a tree-wide check that no `mkdir` forgets its parents.
+409 to 412.
+
+---
+
 ## [2.1.0] - 2026-09-01
 
 21 commits. A hardening release, not a feature release. Every change here either removes a

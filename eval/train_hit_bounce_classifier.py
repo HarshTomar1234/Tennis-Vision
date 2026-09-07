@@ -147,7 +147,7 @@ def main():
     print(f"  weights (standardized): {dict(zip(FEATURE_NAMES, w.round(3)))}")
     print(f"  train={100*tr_acc:.1f}%  test={100*te_acc:.1f}%")
 
-    Path("models").mkdir(exist_ok=True)
+    Path("models").mkdir(parents=True, exist_ok=True)
     weights = {
         "feature_names": FEATURE_NAMES,
         "mu": mu.tolist(),

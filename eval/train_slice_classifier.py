@@ -144,7 +144,7 @@ def main():
             "held_out_test_accuracy": float(te_acc_lr),
         }
 
-    Path("models").mkdir(exist_ok=True)
+    Path("models").mkdir(parents=True, exist_ok=True)
     model.update({
         "trained_on_clips": len(train),
         "tested_on_clips": len(test),

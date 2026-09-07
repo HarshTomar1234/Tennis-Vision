@@ -51,7 +51,7 @@ MANUAL = [
         "tracknet.pt",
         43,
         "Ball detection (TrackNet)",
-        "gdown --id 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt\n"
+        "gdown 1XEYZ4myUN7QT-NeBYJI0xteLsvs-ZAOl -O models/tracknet.pt\n"
         "      (source: https://github.com/yastrebksv/TrackNet - research use only)",
     ),
 ]
@@ -94,7 +94,7 @@ def download_hf(repo_id: str, filename: str, size_mb: int, purpose: str) -> bool
 
 
 def main() -> int:
-    MODELS_DIR.mkdir(exist_ok=True)
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"\nDownloading models into {MODELS_DIR}\n")
 
     ok = True

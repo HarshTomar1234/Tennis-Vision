@@ -177,3 +177,96 @@ def test_readme_test_count_is_current():
         f"README claims {claimed} tests, pytest collects {collected}. "
         f"Update the three counts in README.md."
     )
+
+
+def test_documented_gdown_command_matches_the_installed_gdown():
+    """
+    The one manual step in the golden path must work with the gdown we ship.
+
+    gdown 5 removed the `--id` flag. requirements pinned `gdown>=4.7.1`, so a new user
+    installed 6.x and the command the tool ITSELF prints failed:
+
+        gdown: error: unrecognized arguments: --id
+
+    That broke the documented install path for every new user while every existing
+    developer, who already had the weights, saw nothing. Found by running the published
+    Quickstart from a clean clone.
+
+    This asserts the printed instruction and the dependency floor agree.
+    """
+    import re
+
+    sources = [
+        REPO / "scripts" / "download_models.py",
+        REPO / "trackers" / "tracknet_ball_tracker.py",
+        REPO / "configs" / "config.yaml",
+        REPO / "README.md",
+    ]
+    for path in sources:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "gdown --id" not in text, (
+            f"{path.name} tells the user to run `gdown --id`, which gdown 5+ rejects. "
+            f"Use the positional form: gdown <FILE_ID> -O <path>"
+        )
+
+    # And the floor must be a version that accepts the positional form.
+    pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    floor = re.search(r'"gdown>=(\d+)', pyproject)
+    assert floor and int(floor.group(1)) >= 5, (
+        "gdown must be pinned to >=5, which is where the positional form is required"
+    )
+
+
+def test_output_directories_are_created_from_nothing(tmp_path):
+    """
+    A fresh clone has no output/ directory: it is gitignored, so it exists on every
+    developer machine and on no user's.
+
+    save_stats called out.mkdir(exist_ok=True), which does NOT create parents, so the
+    documented Quickstart command ran the full pipeline for six minutes, finished the
+    analysis, and then died with FileNotFoundError on 'output\stats' without writing
+    anything. Found by running the published Quickstart from a clean clone.
+    """
+    import logging
+    import pandas as pd
+    from main import save_stats
+
+    row = {"frame_num": 0}
+    for p in (1, 2):
+        row |= {f"player_{p}_number_of_shots": 0,
+                f"player_{p}_average_shot_speed": 0.0,
+                f"player_{p}_average_player_speed": 0.0}
+
+    # Two levels deep and neither exists, exactly like output/stats in a fresh clone.
+    target = tmp_path / "output" / "stats"
+    assert not target.parent.exists()
+
+    save_stats(pd.DataFrame([row]), str(target), logging.getLogger("t"))
+
+    assert target.exists(), "save_stats must create its output directory tree"
+    assert list(target.glob("summary_*.json")), "and actually write the summary"
+
+
+def test_no_mkdir_forgets_its_parents():
+    """
+    The same defect anywhere else would fail the same way, six minutes in. Cheap to
+    assert across the tree rather than rely on nobody reintroducing it.
+    """
+    # The pattern is spelled in two halves so this file does not match itself: it
+    # quotes the offending call in its own docstring and failure message.
+    bad = "mkdir(" + "exist_ok=True)"
+    offenders = []
+    for path in REPO.rglob("*.py"):
+        if any(part in {"venv", ".git", "build", "dist"} for part in path.parts):
+            continue
+        if path.name == "test_packaging.py":
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if bad in line:
+                offenders.append(f"{path.relative_to(REPO)}:{i}")
+    assert not offenders, (
+        "mkdir(exist_ok=True) does not create parent directories. Use "
+        "mkdir(parents=True, exist_ok=True):\n  " + "\n  ".join(offenders)
+    )

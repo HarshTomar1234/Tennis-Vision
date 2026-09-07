@@ -239,7 +239,7 @@ def setup_logging(cfg: dict) -> logging.Logger:
 
     if log_cfg.get("write_to_file", True):
         log_dir = Path(cfg["io"].get("log_dir", "logs"))
-        log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         handlers.append(logging.FileHandler(log_dir / f"run_{stamp}.log", encoding="utf-8"))
 
@@ -306,7 +306,7 @@ def save_stats(stats_df: pd.DataFrame, output_dir: str, logger: logging.Logger,
                ball: dict | None = None):
     """Write full stats CSV + match-summary JSON to output_dir."""
     out = Path(output_dir)
-    out.mkdir(exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     csv_path = out / f"stats_{stamp}.csv"
@@ -588,7 +588,7 @@ def main():
             if truncated:
                 logger.info("  Not caching: this run was truncated by --max-frames.")
             else:
-                Path(tracknet_stub).parent.mkdir(exist_ok=True)
+                Path(tracknet_stub).parent.mkdir(parents=True, exist_ok=True)
                 with open(tracknet_stub, "wb") as f:
                     pickle.dump(ball_detections, f)
                 logger.info(f"  Saved TrackNet detections → {tracknet_stub}")
