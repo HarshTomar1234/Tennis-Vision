@@ -3,33 +3,99 @@
 [![CI](https://github.com/HarshTomar1234/Tennis-Vision/actions/workflows/ci.yml/badge.svg)](https://github.com/HarshTomar1234/Tennis-Vision/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Tennis match analysis from a single broadcast camera: ball tracking, court geometry,
-player tracking, shot classification and 3-D trajectory reconstruction.
+An evidence-driven tennis computer-vision pipeline from a single broadcast camera.
+
+Players. Ball. Court geometry. Events. Rally reasoning. 3-D reconstruction.
 
 <div align="center">
-  <img src="frame_images/tennis_analysis_middle_frame107.png" width="820" alt="Annotated output frame">
+  <img src="frame_images/tennis_analysis_middle_frame107.png" width="820" alt="Tennis-Vision annotated broadcast frame with court keypoints, tracked players, ball position and shot statistics">
 </div>
-
-## The one thing that makes this different
 
 Every number this project reports carries the evidence for it, or it is not reported.
 
-That reads like a slogan, so here is what it means in practice. The pipeline refuses to
-print a serve speed when it cannot see the ball land. It flags a clip whose court fit
-failed instead of computing real-world speeds from a court fitted to the crowd. It labels
-a ball height "unknown" rather than dressing up a guess. And this README publishes the
-numbers that make the project look worse alongside the ones that make it look better,
-because the difference between them is usually the interesting part.
+The system is built around a simple rule: a plausible-looking measurement from an
+unsupported input is worse than an explicit refusal. Court evidence gates real-world
+geometry, event evidence gates shot measurements, and every output carries the reason it
+was accepted, downgraded, withheld or rejected.
 
-Two examples from this repository:
+## Three findings that shaped the system
 
-- Ball detection is usually quoted as a "detection rate". Ours is 88.6%. Measured against
-  hand-labelled ground truth, only **42.5%** of visible-ball frames are located within
-  5px. Both numbers are true and they measure different things.
-- Contact and bounce detection scores **87.6% recall given perfect ball positions** and
-  **72.0% running real detection end to end**. The second one is what you actually get.
+These are experimental findings, not product KPIs. Each one changed what the pipeline is
+willing to claim.
 
-Every figure below names the script that produced it.
+| Finding | What the measurement says |
+|---|---|
+| **Ball**  **88.6%** detection rate<br>**42.5%** of visible-ball frames within 5 px | A position being output is not the same as accurate localization. Both numbers are needed to understand the detector. |
+| **Pose**  **85.5%** MediaPipe<br>**66.4%** SAM 3D Body | More landmark coverage did not produce better forehand/backhand task performance. Coverage and task accuracy are separate measurements. |
+| **End to end**  **89.3% / 0.600 F1**<br>**86.4% / 0.824 F1** | The best offline hit/bounce classifier was the worse product model. The shipped feature set was chosen on behaviour with real detections, not benchmark accuracy alone. |
+
+Every published figure names the script and dataset behind it. The full tables, caveats
+and rejected approaches remain below.
+
+## From broadcast pixels to a 3-D flight
+
+The same pipeline that detects the court, players and ball also reconstructs floor-anchored
+flight segments between detected events. The viewer exposes the reconstructed geometry
+together with the evidence behind each segment.
+
+<div align="center">
+  <img src="docs/public/media/3d_reconstruction.gif" width="960" alt="Animated preview of Tennis-Vision's actual interactive 3-D viewer showing reconstructed tennis flights, court geometry, segment speeds and evidence cards">
+</div>
+
+<p align="center"><em>Physics-constrained 3-D reconstruction from broadcast video. Preview captured from the generated viewer; rally speeds are not ground-truth validated.</em></p>
+
+[Open the self-contained interactive 3-D viewer](docs/public/media/tennis_vision_3d_viewer.html) · [View a static viewer screenshot](docs/public/media/tennis_vision_3d_viewer.png)
+
+The HTML viewer runs without a server, external assets or a CDN. It supports orbiting the
+scene, top/side/baseline/broadcast views, timeline playback, segment selection, evidence
+inspection and an annotated-video mode when the local demo video is present. The public
+artifact contains the 3-D scene and evidence; the source broadcast video is not bundled.
+
+## The pipeline as a system
+
+```mermaid
+flowchart LR
+    V[Broadcast video]
+
+    subgraph D[DETECTION]
+      F[FPS support]
+      P[Players + ball]
+      C[Court keypoints]
+      E[Event candidates]
+    end
+
+    subgraph G[EVIDENCE / REFUSAL]
+      CV[Court validity gate]
+      PS[Player selection gate]
+      R[Rally decoding]
+      PV[Physics validation]
+    end
+
+    subgraph M[MEASUREMENT]
+      H[Homography]
+      S[Serve and event measurements]
+      T[3-D flight reconstruction]
+      O[Reports + interactive viewer]
+    end
+
+    V --> F --> P
+    V --> C --> CV
+    P --> PS
+    P --> E --> R
+    CV --> H
+    PS --> H
+    H --> S --> PV --> T --> O
+    R --> S
+```
+
+## When the evidence is insufficient
+
+- **Court fit fails:** real-world measurements are withheld because the homography is not trusted.
+- **Serve landing is not observed:** serve speed is refused instead of extrapolated from an unknown endpoint.
+- **The clip contains a camera cut or unsupported view:** the clip is refused with a reason and usable-frame count.
+
+The system is designed to fail explicitly rather than turn unsupported inputs into
+plausible-looking numbers.
 
 ## Quickstart
 
@@ -55,7 +121,7 @@ Outputs land in `output/`: an annotated video, a per-frame stats CSV, a run summ
 and an interactive 3-D viewer as a single self-contained HTML file with no external
 dependencies.
 
-## What it does
+## Technical pipeline
 
 **Ball tracking.** TrackNet, with the position taken from the largest connected heatmap
 response rather than the mean of all responding pixels. Ball positions map to the court
@@ -151,7 +217,12 @@ Verified working on a GTX 1050 Ti (4.3 GB) in float32. Do not wrap inference in
 `torch.autocast`: the MHR head is a TorchScript module and raises `NotImplementedError`
 inside one. Casting the weights fails in both directions as well.
 
-## Measured results
+## Deep evaluation
+
+The sections below contain the complete measurement record, including negative results,
+unsupported inputs and the numbers that limit how the system should be used.
+
+### Measured results
 
 Scripts marked `(dataset)` need a third-party dataset that is over 7 GB and not
 redistributable. See `datasets/README.md` for sources. Everything else runs against what
@@ -832,7 +903,8 @@ eval/                 every number in this README traces to a script here
 mini_visual_court/    mini-court mapping and trajectory drawing
 models/               small trained weights (committed); large weights fetched by script
 notes/                CV concept write-ups
-scripts/              download_models.py, build_clip_suite.py
+scripts/              download_models.py, build_clip_suite.py, public media tooling
+docs/public/media/    3-D preview, self-contained viewer and static viewer screenshot
 tests/                412 unit and integration tests
 tools/                label_shots.py, keyboard-driven contact and bounce labelling
 trackers/             tracknet_ball_tracker.py, player_tracker.py
