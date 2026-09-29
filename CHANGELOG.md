@@ -19,6 +19,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   output frame.
 - Updated contributor prerequisites to match the package's Python 3.10 minimum and the
   Ruff checks enforced by CI.
+- Added a public 3-D reconstruction preview, packaged self-contained viewer, and a
+  presentation-first README entry point without changing software behaviour or version.
 
 ---
 

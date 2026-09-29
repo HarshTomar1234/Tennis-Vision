@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tennis-Vision - 3D Rally Viewer</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#30363d; --text:#e6edf3;
+          --muted:#8b949e; --accent:#4ec9b0; --active:#ffa657; --idle:#6f97ad; }
+  * { box-sizing:border-box; }
+  /* Flex column, not a magic pixel offset: the previous calc(100vh - 59px) ignored
+     the header, so the page always overflowed and the scrubber sat below the fold. */
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); overflow:hidden;
+         display:flex; flex-direction:column;
+         font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header,footer { flex:none; }
+  header { padding:10px 18px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0 12px 0 0; font-weight:600; }
+  .sub { font-size:12px; color:var(--muted); }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+           padding:6px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.active { background:var(--accent); color:#04211c; border-color:var(--accent);
+                  font-weight:600; }
+  .sep { width:1px; height:22px; background:var(--line); }
+  main { flex:1; min-height:0; display:grid; grid-template-columns:1fr 340px; }
+  @media (max-width:900px){ main { grid-template-columns:1fr; grid-template-rows:55vh 1fr; } }
+  #stage { position:relative; min-height:0; overflow:hidden; }
+  canvas { display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+  canvas:active { cursor:grabbing; }
+  video { width:100%; height:100%; object-fit:contain; background:#000; }
+  .hidden { display:none !important; }
+  aside { border-left:1px solid var(--line); padding:14px; overflow:auto;
+          background:var(--panel); min-height:0; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+       color:var(--muted); margin:0 0 8px; font-weight:600; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--muted);
+            margin-bottom:12px; flex-wrap:wrap; }
+  .sw { display:inline-block; width:16px; height:3px; vertical-align:middle;
+        margin-right:5px; border-radius:2px; }
+  .seg { display:block; width:100%; text-align:left; padding:9px 11px;
+         border:1px solid var(--line); border-radius:6px; margin-bottom:6px;
+         background:transparent; font-variant-numeric:tabular-nums; }
+  .seg:hover { border-color:var(--accent); }
+  .seg[aria-selected="true"] { border-color:var(--accent); background:#11221f; }
+  .seg .top { display:flex; justify-content:space-between; align-items:baseline; }
+  .seg .name { font-weight:600; }
+  .seg .kmh { font-size:18px; font-weight:600; color:var(--accent); }
+  .seg .sub2 { color:var(--muted); font-size:12px; }
+  details { margin-top:5px; }
+  summary { font-size:12px; color:var(--muted); cursor:pointer; }
+  .ev { font-size:12px; color:var(--muted); margin:3px 0 0 10px; }
+  .empty { color:var(--muted); font-size:13px; border:1px dashed var(--line);
+           border-radius:8px; padding:18px; text-align:center; }
+  footer { padding:8px 18px; border-top:1px solid var(--line);
+           display:flex; align-items:center; gap:10px; }
+  #scrubwrap { flex:1; position:relative; }
+  input[type=range] { width:100%; display:block; }
+  #ticks { position:relative; height:5px; margin-top:2px; }
+  #ticks i { position:absolute; height:100%; background:var(--idle); border-radius:2px; }
+  .note { color:var(--muted); font-size:12px; margin-top:14px;
+          border-top:1px solid var(--line); padding-top:10px; }
+  .warn { color:var(--active); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tennis-Vision · 3D Rally</h1>
+  <button id="btn3d" class="active">3D view</button>
+  <button id="btnVideo">Annotated video</button>
+  <span class="sep"></span>
+  <button data-view="broadcast">Broadcast</button>
+  <button data-view="side">Side</button>
+  <button data-view="top">Top</button>
+  <button data-view="baseline">Baseline</button>
+  <button id="reset">Reset</button>
+  <span class="sep"></span>
+  <button id="showall">All flights</button>
+  <span class="sub" id="hint">drag orbit · scroll zoom · arrows/space/R</span>
+</header>
+
+<main>
+  <div id="stage">
+    <canvas id="cv" role="img" aria-label="3D reconstruction of the rally: tennis court with ball flight arcs">
+      Your browser does not support canvas; the 3D view cannot be shown.
+    </canvas>
+    <video id="vid" class="hidden" controls preload="none"></video>
+  </div>
+  <aside>
+    <h2>Flight segments</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--accent)"></i>selected</span>
+      <span><i class="sw" style="background:var(--active)"></i>playing now</span>
+      <span><i class="sw" style="background:var(--idle)"></i>other flights</span>
+    </div>
+    <div id="list"></div>
+    <div class="note" id="note"></div>
+  </aside>
+</main>
+
+<footer>
+  <button id="play">▶ Play</button>
+  <select id="rate" title="playback speed">
+    <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+    <option value="1" selected>1×</option>
+  </select>
+  <div id="scrubwrap">
+    <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="rally timeline">
+    <div id="ticks"></div>
+  </div>
+  <span class="sub" id="tlabel">0.0 s</span>
+</footer>
+
+<script>
+const DATA = {"court": {"length": 23.77, "width": 10.97, "singles_width": 8.23, "service_from_net": 6.4, "net_centre": 0.914, "net_post": 1.07, "post_outside": 0.914}, "segments": [{"start_frame": 5, "end_frame": 25, "start_s": 0.167, "end_s": 0.833, "speed_kmh": 28.1, "apex_m": 2.6, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[3.945, 21.814, 0.0], [3.98, 21.893, 0.195], [4.015, 21.973, 0.383], [4.05, 22.052, 0.563], [4.086, 22.131, 0.736], [4.121, 22.21, 0.901], [4.156, 22.289, 1.059], [4.191, 22.368, 1.209], [4.227, 22.448, 1.351], [4.262, 22.527, 1.486], [4.297, 22.606, 1.613], [4.332, 22.685, 1.733], [4.368, 22.764, 1.845], [4.403, 22.843, 1.95], [4.438, 22.923, 2.047], [4.473, 23.002, 2.136], [4.509, 23.081, 2.218], [4.544, 23.16, 2.292], [4.579, 23.239, 2.359], [4.614, 23.318, 2.418], [4.65, 23.398, 2.469], [4.685, 23.477, 2.513], [4.72, 23.556, 2.55], [4.755, 23.635, 2.579], [4.791, 23.714, 2.6]], "evidence": ["flight 0.67 s - within a single-flight window", "starts on the floor, ends 2.6 m up (racket contact)", "ends at (4.8, 23.7) m - inside the court", "does not cross the net"]}, {"start_frame": 25, "end_frame": 48, "start_s": 0.833, "end_s": 1.6, "speed_kmh": 111.2, "apex_m": 2.72, "label": "Serve", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[4.791, 23.714, 2.6], [5.01, 22.754, 2.644], [5.229, 21.793, 2.679], [5.448, 20.833, 2.703], [5.667, 19.872, 2.717], [5.886, 18.911, 2.721], [6.105, 17.951, 2.716], [6.324, 16.99, 2.7], [6.544, 16.03, 2.674], [6.763, 15.069, 2.638], [6.982, 14.109, 2.592], [7.201, 13.148, 2.537], [7.42, 12.187, 2.471], [7.639, 11.227, 2.395], [7.858, 10.266, 2.309], [8.077, 9.306, 2.213], [8.296, 8.345, 2.107], [8.516, 7.385, 1.991], [8.735, 6.424, 1.866], [8.954, 5.463, 1.73], [9.173, 4.503, 1.584], [9.392, 3.542, 1.428], [9.611, 2.582, 1.262], [9.83, 1.621, 1.086], [10.049, 0.66, 0.9]], "evidence": ["flight 0.77 s - within a single-flight window", "starts 2.6 m up (racket contact), ends 0.9 m up (racket contact)", "ends at (10.0, 0.7) m - inside the court", "crosses the net at 2.45 m (clears the 0.91 m centre)"]}, {"start_frame": 48, "end_frame": 78, "start_s": 1.6, "end_s": 2.6, "speed_kmh": 88.2, "apex_m": 2.13, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[10.049, 0.66, 0.9], [9.927, 1.653, 1.096], [9.804, 2.645, 1.275], [9.682, 3.638, 1.436], [9.559, 4.63, 1.581], [9.437, 5.623, 1.709], [9.314, 6.615, 1.82], [9.191, 7.608, 1.913], [9.069, 8.6, 1.99], [8.946, 9.593, 2.05], [8.824, 10.585, 2.092], [8.701, 11.578, 2.118], [8.579, 12.57, 2.126], [8.456, 13.563, 2.118], [8.334, 14.555, 2.092], [8.211, 15.547, 2.05], [8.088, 16.54, 1.99], [7.966, 17.532, 1.913], [7.843, 18.525, 1.82], [7.721, 19.517, 1.709], [7.598, 20.51, 1.581], [7.476, 21.502, 1.436], [7.353, 22.495, 1.275], [7.231, 23.487, 1.096], [7.108, 24.48, 0.9]], "evidence": ["flight 1.00 s - within a single-flight window", "starts 0.9 m up (racket contact), ends 0.9 m up (racket contact)", "ends at (7.1, 24.5) m - outside the lines (ball out)", "crosses the net at 2.12 m (clears the 0.91 m centre)"]}, {"start_frame": 78, "end_frame": 103, "start_s": 2.6, "end_s": 3.433, "speed_kmh": 87.7, "apex_m": 1.36, "label": "Backhand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[7.108, 24.48, 0.9], [6.951, 23.655, 0.999], [6.795, 22.829, 1.085], [6.638, 22.004, 1.16], [6.481, 21.179, 1.223], [6.325, 20.354, 1.274], [6.168, 19.529, 1.314], [6.012, 18.704, 1.341], [5.855, 17.879, 1.357], [5.698, 17.053, 1.361], [5.542, 16.228, 1.353], [5.385, 15.403, 1.333], [5.228, 14.578, 1.302], [5.072, 13.753, 1.258], [4.915, 12.928, 1.203], [4.758, 12.103, 1.136], [4.602, 11.277, 1.057], [4.445, 10.452, 0.966], [4.289, 9.627, 0.864], [4.132, 8.802, 0.749], [3.975, 7.977, 0.623], [3.819, 7.152, 0.485], [3.662, 6.327, 0.335], [3.505, 5.501, 0.174], [3.349, 4.676, 0.0]], "evidence": ["flight 0.83 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (3.3, 4.7) m - inside the court", "crosses the net at 1.12 m (clears the 0.91 m centre)"]}, {"start_frame": 103, "end_frame": 117, "start_s": 3.433, "end_s": 3.9, "speed_kmh": 36.5, "apex_m": 0.91, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[3.349, 4.676, 0.0], [3.324, 4.499, 0.08], [3.299, 4.322, 0.157], [3.274, 4.144, 0.229], [3.249, 3.967, 0.298], [3.224, 3.79, 0.364], [3.199, 3.612, 0.425], [3.174, 3.435, 0.483], [3.149, 3.257, 0.537], [3.124, 3.08, 0.588], [3.099, 2.903, 0.635], [3.074, 2.725, 0.678], [3.05, 2.548, 0.717], [3.025, 2.371, 0.753], [3.0, 2.193, 0.785], [2.975, 2.016, 0.813], [2.95, 1.839, 0.837], [2.925, 1.661, 0.858], [2.9, 1.484, 0.875], [2.875, 1.307, 0.889], [2.85, 1.129, 0.898], [2.825, 0.952, 0.904], [2.8, 0.775, 0.907], [2.775, 0.597, 0.905], [2.75, 0.42, 0.9]], "evidence": ["flight 0.47 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (2.8, 0.4) m - inside the court", "does not cross the net"]}, {"start_frame": 117, "end_frame": 149, "start_s": 3.9, "end_s": 4.967, "speed_kmh": 63.4, "apex_m": 1.88, "label": "Backhand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[2.75, 0.42, 0.9], [2.935, 1.155, 1.085], [3.12, 1.891, 1.251], [3.305, 2.626, 1.398], [3.49, 3.362, 1.525], [3.675, 4.097, 1.633], [3.86, 4.833, 1.721], [4.045, 5.569, 1.79], [4.23, 6.304, 1.84], [4.415, 7.04, 1.87], [4.6, 7.775, 1.881], [4.785, 8.511, 1.873], [4.97, 9.246, 1.845], [5.155, 9.982, 1.798], [5.34, 10.717, 1.731], [5.525, 11.453, 1.645], [5.71, 12.188, 1.54], [5.895, 12.924, 1.415], [6.08, 13.659, 1.271], [6.265, 14.395, 1.108], [6.45, 15.13, 0.925], [6.634, 15.866, 0.723], [6.819, 16.601, 0.501], [7.004, 17.337, 0.26], [7.189, 18.072, 0.0]], "evidence": ["flight 1.07 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (7.2, 18.1) m - inside the court", "crosses the net at 1.59 m (clears the 0.91 m centre)"]}, {"start_frame": 149, "end_frame": 167, "start_s": 4.967, "end_s": 5.567, "speed_kmh": 37.5, "apex_m": 1.01, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[7.189, 18.072, 0.0], [7.212, 18.307, 0.108], [7.234, 18.542, 0.21], [7.257, 18.777, 0.306], [7.279, 19.011, 0.395], [7.302, 19.246, 0.479], [7.324, 19.481, 0.556], [7.347, 19.716, 0.627], [7.369, 19.95, 0.692], [7.392, 20.185, 0.751], [7.414, 20.42, 0.804], [7.437, 20.655, 0.851], [7.459, 20.89, 0.891], [7.482, 21.124, 0.926], [7.504, 21.359, 0.954], [7.527, 21.594, 0.976], [7.549, 21.829, 0.992], [7.572, 22.063, 1.002], [7.594, 22.298, 1.006], [7.617, 22.533, 1.004], [7.639, 22.768, 0.995], [7.662, 23.003, 0.981], [7.684, 23.237, 0.96], [7.707, 23.472, 0.933], [7.729, 23.707, 0.9]], "evidence": ["flight 0.60 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (7.7, 23.7) m - inside the court", "does not cross the net"]}, {"start_frame": 167, "end_frame": 186, "start_s": 5.567, "end_s": 6.2, "speed_kmh": 104.9, "apex_m": 1.04, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[7.729, 23.707, 0.9], [7.521, 22.968, 0.941], [7.313, 22.229, 0.975], [7.104, 21.49, 1.003], [6.896, 20.751, 1.023], [6.688, 20.012, 1.037], [6.479, 19.273, 1.044], [6.271, 18.534, 1.044], [6.062, 17.795, 1.037], [5.854, 17.056, 1.024], [5.646, 16.317, 1.003], [5.437, 15.578, 0.976], [5.229, 14.839, 0.942], [5.021, 14.1, 0.901], [4.812, 13.361, 0.853], [4.604, 12.622, 0.799], [4.396, 11.883, 0.737], [4.187, 11.144, 0.669], [3.979, 10.405, 0.594], [3.77, 9.666, 0.512], [3.562, 8.927, 0.423], [3.354, 8.189, 0.328], [3.145, 7.45, 0.225], [2.937, 6.711, 0.116], [2.729, 5.972, 0.0]], "evidence": ["flight 0.63 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (2.7, 6.0) m - inside the court", "crosses the net at 0.74 m (below the 0.91 m centre)"]}, {"start_frame": 186, "end_frame": 198, "start_s": 6.2, "end_s": 6.6, "speed_kmh": 61.9, "apex_m": 0.9, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[2.729, 5.972, 0.0], [2.683, 5.698, 0.069], [2.637, 5.424, 0.135], [2.591, 5.15, 0.198], [2.545, 4.876, 0.259], [2.5, 4.602, 0.317], [2.454, 4.329, 0.372], [2.408, 4.055, 0.425], [2.362, 3.781, 0.474], [2.316, 3.507, 0.521], [2.271, 3.233, 0.566], [2.225, 2.959, 0.607], [2.179, 2.686, 0.646], [2.133, 2.412, 0.682], [2.087, 2.138, 0.716], [2.042, 1.864, 0.746], [1.996, 1.59, 0.774], [1.95, 1.316, 0.8], [1.904, 1.042, 0.822], [1.858, 0.769, 0.842], [1.813, 0.495, 0.859], [1.767, 0.221, 0.873], [1.721, -0.053, 0.885], [1.675, -0.327, 0.894], [1.629, -0.601, 0.9]], "evidence": ["flight 0.40 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (1.6, -0.6) m - outside the lines (ball out)", "does not cross the net"]}, {"start_frame": 198, "end_frame": 242, "start_s": 6.6, "end_s": 8.067, "speed_kmh": 61.5, "apex_m": 3.11, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[1.629, -0.601, 0.9], [1.96, 0.305, 1.284], [2.29, 1.21, 1.631], [2.62, 2.115, 1.942], [2.95, 3.02, 2.215], [3.281, 3.926, 2.453], [3.611, 4.831, 2.653], [3.941, 5.736, 2.817], [4.272, 6.641, 2.945], [4.602, 7.547, 3.035], [4.932, 8.452, 3.09], [5.262, 9.357, 3.107], [5.593, 10.262, 3.088], [5.923, 11.168, 3.032], [6.253, 12.073, 2.94], [6.583, 12.978, 2.81], [6.914, 13.883, 2.645], [7.244, 14.788, 2.442], [7.574, 15.694, 2.203], [7.904, 16.599, 1.928], [8.235, 17.504, 1.615], [8.565, 18.409, 1.267], [8.895, 19.315, 0.881], [9.226, 20.22, 0.459], [9.556, 21.125, -0.0]], "evidence": ["flight 1.47 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (9.6, 21.1) m - inside the court", "crosses the net at 2.96 m (clears the 0.91 m centre)"]}, {"start_frame": 242, "end_frame": 260, "start_s": 8.067, "end_s": 8.667, "speed_kmh": 142.4, "apex_m": 1.01, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[9.556, 21.125, 0.0], [9.332, 20.168, 0.108], [9.107, 19.212, 0.21], [8.883, 18.255, 0.306], [8.659, 17.298, 0.395], [8.434, 16.341, 0.479], [8.21, 15.384, 0.556], [7.986, 14.428, 0.627], [7.762, 13.471, 0.692], [7.537, 12.514, 0.751], [7.313, 11.557, 0.804], [7.089, 10.6, 0.851], [6.864, 9.644, 0.891], [6.64, 8.687, 0.926], [6.416, 7.73, 0.954], [6.192, 6.773, 0.976], [5.967, 5.816, 0.992], [5.743, 4.86, 1.002], [5.519, 3.903, 1.006], [5.294, 2.946, 1.004], [5.07, 1.989, 0.995], [4.846, 1.033, 0.981], [4.621, 0.076, 0.96], [4.397, -0.881, 0.933], [4.173, -1.838, 0.9]], "evidence": ["flight 0.60 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (4.2, -1.8) m - outside the lines (ball out)", "crosses the net at 0.79 m (below the 0.91 m centre)"]}, {"start_frame": 260, "end_frame": 278, "start_s": 8.667, "end_s": 9.267, "speed_kmh": 153.3, "apex_m": 1.01, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[4.173, -1.838, 0.9], [4.235, -0.776, 0.933], [4.297, 0.286, 0.96], [4.359, 1.348, 0.981], [4.421, 2.41, 0.995], [4.483, 3.472, 1.004], [4.545, 4.534, 1.006], [4.607, 5.596, 1.002], [4.669, 6.658, 0.992], [4.731, 7.72, 0.976], [4.793, 8.782, 0.954], [4.855, 9.844, 0.926], [4.917, 10.906, 0.891], [4.98, 11.968, 0.851], [5.042, 13.03, 0.804], [5.104, 14.092, 0.751], [5.166, 15.154, 0.692], [5.228, 16.216, 0.627], [5.29, 17.278, 0.556], [5.352, 18.34, 0.479], [5.414, 19.402, 0.395], [5.476, 20.464, 0.306], [5.538, 21.526, 0.21], [5.6, 22.588, 0.108], [5.662, 23.65, 0.0]], "evidence": ["flight 0.60 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (5.7, 23.6) m - inside the court", "crosses the net at 0.85 m (below the 0.91 m centre)"]}, {"start_frame": 278, "end_frame": 294, "start_s": 9.267, "end_s": 9.8, "speed_kmh": 169.6, "apex_m": 0.94, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[5.662, 23.65, 0.0], [5.484, 22.622, 0.093], [5.307, 21.595, 0.182], [5.129, 20.567, 0.265], [4.952, 19.54, 0.344], [4.774, 18.512, 0.418], [4.597, 17.485, 0.487], [4.419, 16.457, 0.551], [4.242, 15.43, 0.61], [4.064, 14.402, 0.664], [3.887, 13.375, 0.714], [3.709, 12.347, 0.759], [3.532, 11.32, 0.799], [3.354, 10.292, 0.834], [3.176, 9.265, 0.864], [2.999, 8.237, 0.889], [2.821, 7.21, 0.91], [2.644, 6.182, 0.926], [2.466, 5.154, 0.937], [2.289, 4.127, 0.943], [2.111, 3.099, 0.944], [1.934, 2.072, 0.94], [1.756, 1.044, 0.932], [1.579, 0.017, 0.918], [1.401, -1.011, 0.9]], "evidence": ["flight 0.53 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (1.4, -1.0) m - outside the lines (ball out)", "crosses the net at 0.78 m (below the 0.91 m centre)"]}, {"start_frame": 294, "end_frame": 315, "start_s": 9.8, "end_s": 10.5, "speed_kmh": 106.8, "apex_m": 1.13, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[1.401, -1.011, 0.9], [1.518, -0.155, 0.958], [1.635, 0.7, 1.009], [1.752, 1.555, 1.05], [1.869, 2.411, 1.084], [1.986, 3.266, 1.109], [2.104, 4.121, 1.126], [2.221, 4.977, 1.134], [2.338, 5.832, 1.134], [2.455, 6.687, 1.126], [2.572, 7.542, 1.109], [2.689, 8.398, 1.084], [2.806, 9.253, 1.051], [2.923, 10.108, 1.009], [3.04, 10.964, 0.959], [3.157, 11.819, 0.901], [3.275, 12.674, 0.834], [3.392, 13.53, 0.759], [3.509, 14.385, 0.676], [3.626, 15.24, 0.584], [3.743, 16.096, 0.484], [3.86, 16.951, 0.375], [3.977, 17.806, 0.259], [4.094, 18.662, 0.133], [4.211, 19.517, 0.0]], "evidence": ["flight 0.70 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (4.2, 19.5) m - inside the court", "crosses the net at 0.90 m (below the 0.91 m centre)"]}, {"start_frame": 315, "end_frame": 334, "start_s": 10.5, "end_s": 11.133, "speed_kmh": 44.9, "apex_m": 1.04, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[4.211, 19.517, 0.0], [4.249, 19.821, 0.116], [4.287, 20.125, 0.225], [4.324, 20.429, 0.328], [4.362, 20.733, 0.423], [4.4, 21.037, 0.512], [4.438, 21.341, 0.594], [4.475, 21.645, 0.669], [4.513, 21.949, 0.737], [4.551, 22.253, 0.799], [4.589, 22.557, 0.853], [4.626, 22.861, 0.901], [4.664, 23.165, 0.942], [4.702, 23.469, 0.976], [4.739, 23.773, 1.003], [4.777, 24.077, 1.024], [4.815, 24.381, 1.037], [4.853, 24.685, 1.044], [4.89, 24.989, 1.044], [4.928, 25.293, 1.037], [4.966, 25.597, 1.023], [5.004, 25.901, 1.003], [5.041, 26.205, 0.975], [5.079, 26.509, 0.941], [5.117, 26.813, 0.9]], "evidence": ["flight 0.63 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (5.1, 26.8) m - outside the lines (ball out)", "does not cross the net"]}, {"start_frame": 334, "end_frame": 358, "start_s": 11.133, "end_s": 11.933, "speed_kmh": 17.6, "apex_m": 1.3, "label": "Backhand", "speed_status": "outlier", "speed_status_reason": "struck and landing on the striker's own side without crossing the net, so either the ball did not complete a free flight or the contact was misdetected", "points": [[5.117, 26.813, 0.9], [5.133, 26.681, 0.988], [5.148, 26.549, 1.065], [5.164, 26.416, 1.131], [5.18, 26.284, 1.186], [5.196, 26.152, 1.23], [5.212, 26.019, 1.264], [5.227, 25.887, 1.286], [5.243, 25.755, 1.298], [5.259, 25.623, 1.298], [5.275, 25.49, 1.288], [5.291, 25.358, 1.267], [5.306, 25.226, 1.235], [5.322, 25.093, 1.192], [5.338, 24.961, 1.138], [5.354, 24.829, 1.073], [5.37, 24.697, 0.998], [5.385, 24.564, 0.911], [5.401, 24.432, 0.814], [5.417, 24.3, 0.705], [5.433, 24.167, 0.586], [5.449, 24.035, 0.456], [5.465, 23.903, 0.315], [5.48, 23.771, 0.163], [5.496, 23.638, 0.0]], "evidence": ["flight 0.80 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (5.5, 23.6) m - inside the court", "does not cross the net"]}, {"start_frame": 358, "end_frame": 378, "start_s": 11.933, "end_s": 12.6, "speed_kmh": 138.3, "apex_m": 1.09, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[5.496, 23.638, 0.0], [5.633, 22.588, 0.125], [5.771, 21.537, 0.242], [5.908, 20.487, 0.351], [6.045, 19.436, 0.453], [6.182, 18.386, 0.547], [6.319, 17.335, 0.634], [6.457, 16.285, 0.713], [6.594, 15.235, 0.784], [6.731, 14.184, 0.848], [6.868, 13.134, 0.905], [7.006, 12.083, 0.954], [7.143, 11.033, 0.995], [7.28, 9.982, 1.029], [7.417, 8.932, 1.055], [7.554, 7.881, 1.073], [7.692, 6.831, 1.084], [7.829, 5.78, 1.088], [7.966, 4.73, 1.084], [8.103, 3.679, 1.072], [8.24, 2.629, 1.053], [8.378, 1.578, 1.026], [8.515, 0.528, 0.992], [8.652, -0.522, 0.95], [8.789, -1.573, 0.9]], "evidence": ["flight 0.67 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (8.8, -1.6) m - outside the lines (ball out)", "crosses the net at 0.96 m (clears the 0.91 m centre)"]}, {"start_frame": 378, "end_frame": 403, "start_s": 12.6, "end_s": 13.433, "speed_kmh": 89.6, "apex_m": 1.36, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[8.789, -1.573, 0.9], [8.574, -0.742, 0.999], [8.359, 0.088, 1.085], [8.144, 0.918, 1.16], [7.929, 1.749, 1.223], [7.713, 2.579, 1.274], [7.498, 3.41, 1.314], [7.283, 4.24, 1.341], [7.068, 5.071, 1.357], [6.853, 5.901, 1.361], [6.637, 6.732, 1.353], [6.422, 7.562, 1.333], [6.207, 8.393, 1.302], [5.992, 9.223, 1.258], [5.777, 10.053, 1.203], [5.561, 10.884, 1.136], [5.346, 11.714, 1.057], [5.131, 12.545, 0.966], [4.916, 13.375, 0.864], [4.701, 14.206, 0.749], [4.486, 15.036, 0.623], [4.27, 15.867, 0.485], [4.055, 16.697, 0.335], [3.84, 17.528, 0.174], [3.625, 18.358, 0.0]], "evidence": ["flight 0.83 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (3.6, 18.4) m - inside the court", "crosses the net at 1.04 m (clears the 0.91 m centre)"]}, {"start_frame": 403, "end_frame": 414, "start_s": 13.433, "end_s": 13.8, "speed_kmh": 56.8, "apex_m": 0.9, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[3.625, 18.358, 0.0], [3.628, 18.59, 0.064], [3.632, 18.822, 0.125], [3.635, 19.055, 0.185], [3.639, 19.287, 0.242], [3.643, 19.519, 0.296], [3.646, 19.751, 0.349], [3.65, 19.983, 0.399], [3.653, 20.216, 0.447], [3.657, 20.448, 0.492], [3.66, 20.68, 0.535], [3.664, 20.912, 0.576], [3.667, 21.144, 0.615], [3.671, 21.376, 0.651], [3.675, 21.609, 0.685], [3.678, 21.841, 0.717], [3.682, 22.073, 0.747], [3.685, 22.305, 0.774], [3.689, 22.537, 0.799], [3.692, 22.77, 0.821], [3.696, 23.002, 0.842], [3.699, 23.234, 0.86], [3.703, 23.466, 0.875], [3.707, 23.698, 0.889], [3.71, 23.93, 0.9]], "evidence": ["flight 0.37 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (3.7, 23.9) m - outside the lines (ball out)", "does not cross the net"]}, {"start_frame": 414, "end_frame": 441, "start_s": 13.8, "end_s": 14.7, "speed_kmh": 89.9, "apex_m": 1.49, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[3.71, 23.93, 0.9], [3.86, 23.015, 1.021], [4.01, 22.1, 1.128], [4.159, 21.185, 1.222], [4.309, 20.27, 1.302], [4.459, 19.355, 1.368], [4.609, 18.44, 1.42], [4.758, 17.525, 1.458], [4.908, 16.61, 1.483], [5.058, 15.695, 1.494], [5.208, 14.78, 1.491], [5.357, 13.865, 1.474], [5.507, 12.95, 1.443], [5.657, 12.034, 1.399], [5.807, 11.119, 1.341], [5.956, 10.204, 1.269], [6.106, 9.289, 1.183], [6.256, 8.374, 1.083], [6.406, 7.459, 0.97], [6.556, 6.544, 0.843], [6.705, 5.629, 0.702], [6.855, 4.714, 0.547], [7.005, 3.799, 0.378], [7.155, 2.884, 0.196], [7.304, 1.969, 0.0]], "evidence": ["flight 0.90 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (7.3, 2.0) m - inside the court", "crosses the net at 1.39 m (clears the 0.91 m centre)"]}, {"start_frame": 441, "end_frame": 451, "start_s": 14.7, "end_s": 15.033, "speed_kmh": 36.5, "apex_m": 0.9, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[7.304, 1.969, 0.0], [7.327, 1.843, 0.059], [7.349, 1.718, 0.117], [7.371, 1.593, 0.172], [7.393, 1.467, 0.226], [7.415, 1.342, 0.277], [7.438, 1.217, 0.327], [7.46, 1.091, 0.375], [7.482, 0.966, 0.421], [7.504, 0.841, 0.465], [7.526, 0.715, 0.507], [7.548, 0.59, 0.548], [7.571, 0.464, 0.586], [7.593, 0.339, 0.623], [7.615, 0.214, 0.657], [7.637, 0.088, 0.69], [7.659, -0.037, 0.721], [7.682, -0.162, 0.75], [7.704, -0.288, 0.777], [7.726, -0.413, 0.802], [7.748, -0.538, 0.826], [7.77, -0.664, 0.847], [7.793, -0.789, 0.867], [7.815, -0.914, 0.884], [7.837, -1.04, 0.9]], "evidence": ["flight 0.33 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (7.8, -1.0) m - outside the lines (ball out)", "does not cross the net"]}, {"start_frame": 451, "end_frame": 484, "start_s": 15.033, "end_s": 16.133, "speed_kmh": 90.1, "apex_m": 2.38, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[7.837, -1.04, 0.9], [7.645, 0.064, 1.137], [7.453, 1.168, 1.353], [7.261, 2.271, 1.549], [7.069, 3.375, 1.724], [6.877, 4.478, 1.879], [6.685, 5.582, 2.013], [6.493, 6.686, 2.126], [6.301, 7.789, 2.219], [6.109, 8.893, 2.291], [5.918, 9.996, 2.343], [5.726, 11.1, 2.373], [5.534, 12.204, 2.384], [5.342, 13.307, 2.373], [5.15, 14.411, 2.343], [4.958, 15.514, 2.291], [4.766, 16.618, 2.219], [4.574, 17.722, 2.126], [4.382, 18.825, 2.013], [4.19, 19.929, 1.879], [3.998, 21.032, 1.724], [3.806, 22.136, 1.549], [3.614, 23.24, 1.353], [3.422, 24.343, 1.137], [3.23, 25.447, 0.9]], "evidence": ["flight 1.10 s - within a single-flight window", "starts 0.9 m up (racket contact), ends 0.9 m up (racket contact)", "ends at (3.2, 25.4) m - outside the lines (ball out)", "crosses the net at 2.38 m (clears the 0.91 m centre)"]}, {"start_frame": 484, "end_frame": 520, "start_s": 16.133, "end_s": 17.333, "speed_kmh": 70.8, "apex_m": 2.67, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[3.23, 25.447, 0.9], [3.398, 24.523, 1.182], [3.565, 23.599, 1.44], [3.732, 22.676, 1.673], [3.899, 21.752, 1.881], [4.067, 20.828, 2.065], [4.234, 19.905, 2.224], [4.401, 18.981, 2.359], [4.569, 18.057, 2.47], [4.736, 17.134, 2.555], [4.903, 16.21, 2.617], [5.071, 15.286, 2.654], [5.238, 14.362, 2.666], [5.405, 13.439, 2.654], [5.572, 12.515, 2.617], [5.74, 11.591, 2.555], [5.907, 10.668, 2.47], [6.074, 9.744, 2.359], [6.242, 8.82, 2.224], [6.409, 7.897, 2.065], [6.576, 6.973, 1.881], [6.744, 6.049, 1.673], [6.911, 5.126, 1.44], [7.078, 4.202, 1.182], [7.245, 3.278, 0.9]], "evidence": ["flight 1.20 s - within a single-flight window", "starts 0.9 m up (racket contact), ends 0.9 m up (racket contact)", "ends at (7.2, 3.3) m - inside the court", "crosses the net at 2.58 m (clears the 0.91 m centre)"]}, {"start_frame": 520, "end_frame": 548, "start_s": 17.333, "end_s": 18.267, "speed_kmh": 73.4, "apex_m": 1.56, "label": "Forehand", "speed_status": "valid", "speed_status_reason": "free flight between a racket contact and a known endpoint", "points": [[7.245, 3.278, 0.9], [7.376, 4.047, 1.033], [7.507, 4.817, 1.151], [7.638, 5.586, 1.255], [7.77, 6.355, 1.343], [7.901, 7.124, 1.417], [8.032, 7.893, 1.476], [8.163, 8.663, 1.52], [8.294, 9.432, 1.55], [8.425, 10.201, 1.564], [8.556, 10.97, 1.564], [8.687, 11.739, 1.548], [8.818, 12.509, 1.518], [8.949, 13.278, 1.473], [9.08, 14.047, 1.414], [9.211, 14.816, 1.339], [9.342, 15.585, 1.25], [9.473, 16.355, 1.145], [9.604, 17.124, 1.026], [9.735, 17.893, 0.892], [9.866, 18.662, 0.743], [9.997, 19.431, 0.58], [10.128, 20.201, 0.401], [10.259, 20.97, 0.208], [10.39, 21.739, 0.0]], "evidence": ["flight 0.93 s - within a single-flight window", "starts 0.9 m up (racket contact), ends on the floor", "ends at (10.4, 21.7) m - inside the court", "crosses the net at 1.54 m (clears the 0.91 m centre)"]}, {"start_frame": 548, "end_frame": 564, "start_s": 18.267, "end_s": 18.8, "speed_kmh": 48.5, "apex_m": 0.94, "label": "Flight", "speed_status": "not_a_shot", "speed_status_reason": "begins at a bounce, so it is the ball travelling from the bounce to the receiver rather than a ball leaving a racket", "points": [[10.39, 21.739, 0.0], [10.217, 21.964, 0.093], [10.045, 22.19, 0.182], [9.873, 22.415, 0.265], [9.7, 22.64, 0.344], [9.528, 22.866, 0.418], [9.356, 23.091, 0.487], [9.183, 23.316, 0.551], [9.011, 23.542, 0.61], [8.839, 23.767, 0.664], [8.666, 23.992, 0.714], [8.494, 24.218, 0.759], [8.322, 24.443, 0.799], [8.149, 24.668, 0.834], [7.977, 24.894, 0.864], [7.805, 25.119, 0.889], [7.632, 25.344, 0.91], [7.46, 25.57, 0.926], [7.288, 25.795, 0.937], [7.115, 26.02, 0.943], [6.943, 26.246, 0.944], [6.771, 26.471, 0.94], [6.598, 26.696, 0.932], [6.426, 26.922, 0.918], [6.254, 27.147, 0.9]], "evidence": ["flight 0.53 s - within a single-flight window", "starts on the floor, ends 0.9 m up (racket contact)", "ends at (6.3, 27.1) m - outside the lines (ball out)", "does not cross the net"]}], "video":null, "court_valid": true, "players": {"0": {"1": [9.22, -0.2], "2": [4.71, 24.55]}, "1": {"1": [9.22, -0.2], "2": [4.71, 24.54]}, "2": {"1": [9.22, -0.2], "2": [4.71, 24.53]}, "3": {"1": [9.22, -0.19], "2": [4.72, 24.51]}, "4": {"1": [9.22, -0.19], "2": [4.72, 24.5]}, "5": {"1": [9.22, -0.18], "2": [4.73, 24.5]}, "6": {"1": [9.21, -0.17], "2": [4.74, 24.5]}, "7": {"1": [9.21, -0.17], "2": [4.74, 24.5]}, "8": {"1": [9.21, -0.16], "2": [4.73, 24.51]}, "9": {"1": [9.2, -0.17], "2": [4.72, 24.49]}, "10": {"1": [9.2, -0.17], "2": [4.7, 24.45]}, "11": {"1": [9.2, -0.16], "2": [4.69, 24.38]}, "12": {"1": [9.2, -0.16], "2": [4.69, 24.32]}, "13": {"1": [9.2, -0.16], "2": [4.68, 24.26]}, "14": {"1": [9.2, -0.17], "2": [4.67, 24.21]}, "15": {"1": [9.19, -0.18], "2": [4.66, 24.14]}, "16": {"1": [9.19, -0.15], "2": [4.64, 24.07]}, "17": {"1": [9.19, -0.13], "2": [4.63, 24.01]}, "18": {"1": [9.19, -0.12], "2": [4.63, 23.98]}, "19": {"1": [9.2, -0.12], "2": [4.63, 23.96]}, "20": {"1": [9.2, -0.12], "2": [4.64, 23.95]}, "21": {"1": [9.2, -0.12], "2": [4.67, 23.97]}, "22": {"1": [9.2, -0.12], "2": [4.71, 23.97]}, "23": {"1": [9.21, -0.11], "2": [4.76, 23.9]}, "24": {"1": [9.22, -0.11], "2": [4.79, 23.83]}, "25": {"1": [9.25, -0.12], "2": [4.81, 23.75]}, "26": {"1": [9.29, -0.16], "2": [4.81, 23.63]}, "27": {"1": [9.34, -0.17], "2": [4.81, 23.48]}, "28": {"1": [9.38, -0.12], "2": [4.82, 23.34]}, "29": {"1": [9.41, 0.03], "2": [4.82, 23.23]}, "30": {"1": [9.44, 0.17], "2": [4.83, 23.18]}, "31": {"1": [9.45, 0.31], "2": [4.84, 23.11]}, "32": {"1": [9.45, 0.42], "2": [4.85, 23.09]}, "33": {"1": [9.45, 0.48], "2": [4.86, 23.13]}, "34": {"1": [9.46, 0.5], "2": [4.88, 23.23]}, "35": {"1": [9.51, 0.48], "2": [4.91, 23.3]}, "36": {"1": [9.54, 0.44], "2": [4.93, 23.34]}, "37": {"1": [9.58, 0.41], "2": [4.95, 23.34]}, "38": {"1": [9.61, 0.41], "2": [4.97, 23.35]}, "39": {"1": [9.64, 0.42], "2": [4.99, 23.33]}, "40": {"1": [9.68, 0.44], "2": [5.02, 23.3]}, "41": {"1": [9.72, 0.47], "2": [5.04, 23.26]}, "42": {"1": [9.75, 0.5], "2": [5.06, 23.23]}, "43": {"1": [9.76, 0.78], "2": [5.09, 23.21]}, "44": {"1": [9.82, 0.79], "2": [5.12, 23.22]}, "45": {"1": [9.9, 0.71], "2": [5.17, 23.22]}, "46": {"1": [9.99, 0.65], "2": [5.24, 23.2]}, "47": {"1": [10.05, 0.64], "2": [5.32, 23.21]}, "48": {"1": [10.07, 0.65], "2": [5.37, 23.21]}, "49": {"1": [10.08, 0.67], "2": [5.4, 23.21]}, "50": {"1": [10.08, 0.68], "2": [5.41, 23.22]}, "51": {"1": [10.1, 0.72], "2": [5.41, 23.22]}, "52": {"1": [10.15, 0.79], "2": [5.41, 23.25]}, "53": {"1": [10.21, 0.89], "2": [5.42, 23.33]}, "54": {"1": [10.25, 0.96], "2": [5.43, 23.4]}, "55": {"1": [10.28, 1.13], "2": [5.43, 23.45]}, "56": {"1": [10.32, 1.17], "2": [5.42, 23.51]}, "57": {"1": [10.36, 1.18], "2": [5.41, 23.57]}, "58": {"1": [10.4, 1.17], "2": [5.39, 23.63]}, "59": {"1": [10.43, 1.21], "2": [5.39, 23.66]}, "60": {"1": [10.44, 1.24], "2": [5.39, 23.68]}, "61": {"1": [10.46, 1.23], "2": [5.42, 23.7]}, "62": {"1": [10.46, 1.23], "2": [5.47, 23.72]}, "63": {"1": [10.43, 1.26], "2": [5.57, 23.74]}, "64": {"1": [10.38, 1.3], "2": [5.72, 23.74]}, "65": {"1": [10.3, 1.33], "2": [5.88, 23.75]}, "66": {"1": [10.24, 1.35], "2": [5.98, 23.75]}, "67": {"1": [10.14, 1.34], "2": [6.08, 23.74]}, "68": {"1": [9.98, 1.33], "2": [6.19, 23.71]}, "69": {"1": [9.81, 1.31], "2": [6.3, 23.73]}, "70": {"1": [9.66, 1.17], "2": [6.43, 23.82]}, "71": {"1": [9.51, 1.09], "2": [6.54, 23.93]}, "72": {"1": [9.41, 1.05], "2": [6.61, 24.01]}, "73": {"1": [9.3, 0.93], "2": [6.67, 24.11]}, "74": {"1": [9.21, 0.86], "2": [6.75, 24.25]}, "75": {"1": [9.13, 0.82], "2": [6.81, 24.39]}, "76": {"1": [9.05, 0.8], "2": [6.87, 24.48]}, "77": {"1": [8.95, 0.78], "2": [7.0, 24.52]}, "78": {"1": [8.88, 0.77], "2": [7.1, 24.53]}, "79": {"1": [8.78, 0.76], "2": [7.19, 24.51]}, "80": {"1": [8.64, 0.65], "2": [7.28, 24.48]}, "81": {"1": [8.47, 0.41], "2": [7.37, 24.44]}, "82": {"1": [8.28, 0.24], "2": [7.47, 24.43]}, "83": {"1": [8.08, 0.21], "2": [7.56, 24.44]}, "84": {"1": [7.96, 0.23], "2": [7.62, 24.46]}, "85": {"1": [7.84, 0.31], "2": [7.67, 24.49]}, "86": {"1": [7.7, 0.38], "2": [7.71, 24.56]}, "87": {"1": [7.54, 0.42], "2": [7.77, 24.68]}, "88": {"1": [7.39, 0.44], "2": [7.82, 24.85]}, "89": {"1": [7.28, 0.48], "2": [7.91, 24.97]}, "90": {"1": [7.21, 0.51], "2": [7.97, 25.03]}, "91": {"1": [7.15, 0.51], "2": [8.03, 25.04]}, "92": {"1": [7.06, 0.42], "2": [8.07, 25.04]}, "93": {"1": [6.9, 0.32], "2": [8.09, 25.02]}, "94": {"1": [6.66, 0.22], "2": [8.1, 25.01]}, "95": {"1": [6.42, 0.15], "2": [8.12, 25.0]}, "96": {"1": [6.26, 0.11], "2": [8.13, 24.99]}, "97": {"1": [6.14, 0.16], "2": [8.15, 24.99]}, "98": {"1": [6.03, 0.21], "2": [8.18, 24.99]}, "99": {"1": [5.88, 0.31], "2": [8.19, 24.99]}, "100": {"1": [5.69, 0.42], "2": [8.18, 24.99]}, "101": {"1": [5.47, 0.49], "2": [8.14, 24.99]}, "102": {"1": [5.31, 0.54], "2": [8.09, 24.99]}, "103": {"1": [5.11, 0.54], "2": [8.03, 24.99]}, "104": {"1": [4.86, 0.46], "2": [7.93, 24.99]}, "105": {"1": [4.6, 0.4], "2": [7.83, 24.99]}, "106": {"1": [4.35, 0.42], "2": [7.72, 24.99]}, "107": {"1": [4.13, 0.61], "2": [7.61, 24.99]}, "108": {"1": [4.0, 0.8], "2": [7.54, 24.99]}, "109": {"1": [3.88, 0.94], "2": [7.47, 24.99]}, "110": {"1": [3.77, 1.0], "2": [7.43, 24.99]}, "111": {"1": [3.68, 0.99], "2": [7.41, 24.99]}, "112": {"1": [3.57, 0.95], "2": [7.38, 24.99]}, "113": {"1": [3.44, 0.82], "2": [7.35, 24.99]}, "114": {"1": [3.35, 0.7], "2": [7.33, 24.99]}, "115": {"1": [3.25, 0.58], "2": [7.3, 24.99]}, "116": {"1": [3.06, 0.49], "2": [7.25, 24.99]}, "117": {"1": [2.82, 0.41], "2": [7.17, 24.99]}, "118": {"1": [2.64, 0.37], "2": [7.09, 24.99]}, "119": {"1": [2.53, 0.26], "2": [7.0, 24.99]}, "120": {"1": [2.48, 0.18], "2": [6.95, 24.99]}, "121": {"1": [2.46, 0.19], "2": [6.88, 24.99]}, "122": {"1": [2.39, 0.21], "2": [6.81, 24.99]}, "123": {"1": [2.29, 0.27], "2": [6.74, 24.99]}, "124": {"1": [2.15, 0.33], "2": [6.68, 24.99]}, "125": {"1": [1.93, 0.36], "2": [6.64, 24.99]}, "126": {"1": [1.78, 0.37], "2": [6.63, 24.99]}, "127": {"1": [1.65, 0.39], "2": [6.62, 24.99]}, "128": {"1": [1.52, 0.43], "2": [6.62, 24.99]}, "129": {"1": [1.4, 0.48], "2": [6.62, 24.99]}, "130": {"1": [1.3, 0.53], "2": [6.61, 24.99]}, "131": {"1": [1.21, 0.58], "2": [6.6, 24.99]}, "132": {"1": [1.17, 0.61], "2": [6.59, 24.99]}, "133": {"1": [1.15, 0.64], "2": [6.59, 24.99]}, "134": {"1": [1.14, 0.64], "2": [6.6, 24.99]}, "135": {"1": [1.14, 0.62], "2": [6.64, 24.99]}, "136": {"1": [1.15, 0.59], "2": [6.71, 24.99]}, "137": {"1": [1.17, 0.54], "2": [6.8, 24.99]}, "138": {"1": [1.19, 0.5], "2": [6.86, 24.99]}, "139": {"1": [1.22, 0.43], "2": [6.93, 24.99]}, "140": {"1": [1.25, 0.37], "2": [7.01, 24.99]}, "141": {"1": [1.29, 0.33], "2": [7.09, 24.99]}, "142": {"1": [1.33, 0.31], "2": [7.16, 24.99]}, "143": {"1": [1.38, 0.29], "2": [7.22, 24.99]}, "144": {"1": [1.41, 0.26], "2": [7.27, 24.99]}, "145": {"1": [1.47, 0.25], "2": [7.31, 24.99]}, "146": {"1": [1.57, 0.2], "2": [7.35, 24.99]}, "147": {"1": [1.7, 0.09], "2": [7.41, 24.99]}, "148": {"1": [1.85, 0.05], "2": [7.46, 24.99]}, "149": {"1": [1.97, 0.04], "2": [7.51, 24.99]}, "150": {"1": [2.04, 0.06], "2": [7.54, 24.99]}, "151": {"1": [2.11, 0.03], "2": [7.57, 24.99]}, "152": {"1": [2.2, 0.09], "2": [7.59, 24.99]}, "153": {"1": [2.34, 0.17], "2": [7.61, 24.9]}, "154": {"1": [2.51, 0.24], "2": [7.64, 24.73]}, "155": {"1": [2.65, 0.28], "2": [7.67, 24.56]}, "156": {"1": [2.73, 0.3], "2": [7.69, 24.46]}, "157": {"1": [2.81, 0.3], "2": [7.7, 24.41]}, "158": {"1": [2.91, 0.21], "2": [7.71, 24.4]}, "159": {"1": [3.04, 0.09], "2": [7.72, 24.41]}, "160": {"1": [3.16, -0.01], "2": [7.72, 24.43]}, "161": {"1": [3.27, -0.15], "2": [7.73, 24.45]}, "162": {"1": [3.33, -0.26], "2": [7.74, 24.47]}, "163": {"1": [3.39, -0.35], "2": [7.73, 24.46]}, "164": {"1": [3.45, -0.42], "2": [7.74, 24.4]}, "165": {"1": [3.51, -0.47], "2": [7.75, 24.26]}, "166": {"1": [3.56, -0.51], "2": [7.75, 24.02]}, "167": {"1": [3.63, -0.58], "2": [7.74, 23.78]}, "168": {"1": [3.67, -0.63], "2": [7.73, 23.64]}, "169": {"1": [3.73, -0.71], "2": [7.68, 23.54]}, "170": {"1": [3.8, -0.78], "2": [7.64, 23.49]}, "171": {"1": [3.88, -0.77], "2": [7.62, 23.51]}, "172": {"1": [3.94, -0.72], "2": [7.6, 23.55]}, "173": {"1": [3.99, -0.69], "2": [7.61, 23.57]}, "174": {"1": [4.01, -0.66], "2": [7.63, 23.59]}, "175": {"1": [4.02, -0.66], "2": [7.67, 23.56]}, "176": {"1": [4.03, -0.66], "2": [7.71, 23.46]}, "177": {"1": [4.03, -0.65], "2": [7.74, 23.34]}, "178": {"1": [4.01, -0.71], "2": [7.74, 23.19]}, "179": {"1": [3.95, -0.74], "2": [7.73, 23.07]}, "180": {"1": [3.91, -0.75], "2": [7.7, 23.0]}, "181": {"1": [3.82, -0.77], "2": [7.67, 22.97]}, "182": {"1": [3.67, -0.74], "2": [7.62, 22.97]}, "183": {"1": [3.49, -0.73], "2": [7.59, 22.99]}, "184": {"1": [3.33, -0.76], "2": [7.58, 23.01]}, "185": {"1": [3.2, -0.72], "2": [7.57, 23.03]}, "186": {"1": [3.12, -0.67], "2": [7.57, 23.04]}, "187": {"1": [3.06, -0.53], "2": [7.56, 23.04]}, "188": {"1": [2.97, -0.39], "2": [7.54, 23.04]}, "189": {"1": [2.83, -0.3], "2": [7.52, 23.07]}, "190": {"1": [2.68, -0.25], "2": [7.49, 23.14]}, "191": {"1": [2.59, -0.23], "2": [7.45, 23.24]}, "192": {"1": [2.55, -0.23], "2": [7.42, 23.31]}, "193": {"1": [2.47, -0.24], "2": [7.4, 23.41]}, "194": {"1": [2.33, -0.3], "2": [7.38, 23.5]}, "195": {"1": [2.14, -0.43], "2": [7.38, 23.55]}, "196": {"1": [1.93, -0.62], "2": [7.37, 23.57]}, "197": {"1": [1.73, -0.67], "2": [7.36, 23.58]}, "198": {"1": [1.6, -0.66], "2": [7.35, 23.58]}, "199": {"1": [1.51, -0.45], "2": [7.35, 23.57]}, "200": {"1": [1.4, -0.23], "2": [7.33, 23.57]}, "201": {"1": [1.3, -0.02], "2": [7.31, 23.6]}, "202": {"1": [1.21, 0.12], "2": [7.28, 23.66]}, "203": {"1": [1.13, 0.24], "2": [7.26, 23.77]}, "204": {"1": [1.09, 0.3], "2": [7.26, 23.87]}, "205": {"1": [1.06, 0.28], "2": [7.25, 23.93]}, "206": {"1": [1.03, 0.25], "2": [7.25, 23.97]}, "207": {"1": [1.01, 0.19], "2": [7.24, 23.98]}, "208": {"1": [1.0, 0.12], "2": [7.23, 23.97]}, "209": {"1": [0.98, 0.05], "2": [7.23, 23.97]}, "210": {"1": [0.98, -0.0], "2": [7.23, 23.96]}, "211": {"1": [0.98, -0.07], "2": [7.24, 23.92]}, "212": {"1": [0.97, -0.14], "2": [7.28, 23.87]}, "213": {"1": [0.95, -0.23], "2": [7.35, 23.84]}, "214": {"1": [0.93, -0.29], "2": [7.46, 23.84]}, "215": {"1": [0.92, -0.31], "2": [7.61, 23.83]}, "216": {"1": [0.92, -0.32], "2": [7.72, 23.82]}, "217": {"1": [0.95, -0.31], "2": [7.8, 23.82]}, "218": {"1": [0.99, -0.3], "2": [7.89, 23.79]}, "219": {"1": [1.06, -0.32], "2": [7.98, 23.75]}, "220": {"1": [1.16, -0.36], "2": [8.12, 23.7]}, "221": {"1": [1.27, -0.42], "2": [8.26, 23.65]}, "222": {"1": [1.34, -0.46], "2": [8.35, 23.62]}, "223": {"1": [1.42, -0.57], "2": [8.42, 23.58]}, "224": {"1": [1.52, -0.66], "2": [8.49, 23.51]}, "225": {"1": [1.62, -0.74], "2": [8.56, 23.47]}, "226": {"1": [1.71, -0.74], "2": [8.64, 23.46]}, "227": {"1": [1.8, -0.75], "2": [8.74, 23.5]}, "228": {"1": [1.85, -0.74], "2": [8.8, 23.54]}, "229": {"1": [1.89, -0.75], "2": [8.91, 23.57]}, "230": {"1": [1.95, -0.73], "2": [9.06, 23.64]}, "231": {"1": [2.0, -0.71], "2": [9.22, 23.68]}, "232": {"1": [2.07, -0.71], "2": [9.35, 23.85]}, "233": {"1": [2.19, -0.7], "2": [9.48, 24.03]}, "234": {"1": [2.28, -0.7], "2": [9.56, 24.16]}, "235": {"1": [2.4, -0.71], "2": [9.64, 24.25]}, "236": {"1": [2.56, -0.75], "2": [9.74, 24.3]}, "237": {"1": [2.7, -0.86], "2": [9.86, 24.32]}, "238": {"1": [2.84, -0.88], "2": [9.98, 24.32]}, "239": {"1": [2.98, -0.92], "2": [10.09, 24.32]}, "240": {"1": [3.07, -0.94], "2": [10.15, 24.31]}, "241": {"1": [3.17, -0.88], "2": [10.22, 24.32]}, "242": {"1": [3.28, -0.77], "2": [10.28, 24.33]}, "243": {"1": [3.38, -0.7], "2": [10.36, 24.35]}, "244": {"1": [3.49, -0.66], "2": [10.47, 24.38]}, "245": {"1": [3.64, -0.66], "2": [10.61, 24.4]}, "246": {"1": [3.74, -0.67], "2": [10.71, 24.42]}, "247": {"1": [3.86, -0.71], "2": [10.82, 24.45]}, "248": {"1": [3.98, -0.78], "2": [10.9, 24.47]}, "249": {"1": [4.08, -0.92], "2": [10.99, 24.49]}, "250": {"1": [4.14, -1.0], "2": [11.08, 24.5]}, "251": {"1": [4.17, -1.04], "2": [11.18, 24.5]}, "252": {"1": [4.18, -1.05], "2": [11.24, 24.5]}, "253": {"1": [4.17, -1.05], "2": [11.3, 24.49]}, "254": {"1": [4.17, -1.04], "2": [11.35, 24.49]}, "255": {"1": [4.17, -1.03], "2": [11.39, 24.48]}, "256": {"1": [4.17, -1.03], "2": [11.45, 24.47]}, "257": {"1": [4.15, -1.02], "2": [11.55, 24.45]}, "258": {"1": [4.15, -1.02], "2": [11.62, 24.42]}, "259": {"1": [4.15, -1.02], "2": [11.69, 24.37]}, "260": {"1": [4.16, -1.02], "2": [11.76, 24.31]}, "261": {"1": [4.19, -1.01], "2": [11.81, 24.24]}, "262": {"1": [4.21, -1.02], "2": [11.88, 24.17]}, "263": {"1": [4.22, -1.02], "2": [11.97, 24.13]}, "264": {"1": [4.26, -1.02], "2": [12.01, 24.13]}, "265": {"1": [4.29, -1.02], "2": [12.02, 24.13]}, "266": {"1": [4.31, -1.02], "2": [12.02, 24.11]}, "267": {"1": [4.32, -1.02], "2": [12.01, 24.07]}, "268": {"1": [4.31, -1.02], "2": [12.0, 24.04]}, "269": {"1": [4.3, -1.02], "2": [12.0, 24.01]}, "270": {"1": [4.33, -1.02], "2": [11.99, 24.0]}, "271": {"1": [4.34, -1.02], "2": [11.99, 23.98]}, "272": {"1": [4.3, -1.02], "2": [11.99, 23.97]}, "273": {"1": [4.22, -1.02], "2": [11.99, 23.95]}, "274": {"1": [4.07, -1.02], "2": [11.98, 23.92]}, "275": {"1": [3.88, -1.02], "2": [11.99, 23.89]}, "276": {"1": [3.77, -1.02], "2": [11.99, 23.88]}, "277": {"1": [3.62, -1.02], "2": [11.99, 23.86]}, "278": {"1": [3.48, -1.02], "2": [11.99, 23.83]}, "279": {"1": [3.36, -1.02], "2": [11.99, 23.8]}, "280": {"1": [3.28, -1.02], "2": [11.99, 23.78]}, "281": {"1": [3.15, -1.02], "2": [11.99, 23.78]}, "282": {"1": [3.06, -1.02], "2": [11.99, 23.78]}, "283": {"1": [2.92, -1.02], "2": [11.99, 23.83]}, "284": {"1": [2.76, -1.02], "2": [11.99, 23.91]}, "285": {"1": [2.61, -1.02], "2": [11.99, 24.0]}, "286": {"1": [2.51, -1.02], "2": [11.99, 24.07]}, "287": {"1": [2.36, -1.02], "2": [11.97, 24.13]}, "288": {"1": [2.26, -1.02], "2": [11.96, 24.17]}, "289": {"1": [2.17, -1.02], "2": [11.91, 24.19]}, "290": {"1": [2.09, -1.02], "2": [11.84, 24.19]}, "291": {"1": [2.0, -1.02], "2": [11.73, 24.19]}, "292": {"1": [1.83, -1.02], "2": [11.58, 24.18]}, "293": {"1": [1.59, -1.02], "2": [11.4, 24.17]}, "294": {"1": [1.41, -1.01], "2": [11.29, 24.16]}, "295": {"1": [1.24, -0.99], "2": [11.2, 24.15]}, "296": {"1": [1.13, -1.0], "2": [11.13, 24.14]}, "297": {"1": [1.0, -1.01], "2": [11.04, 24.15]}, "298": {"1": [0.92, -1.01], "2": [10.93, 24.21]}, "299": {"1": [0.86, -0.82], "2": [10.77, 24.29]}, "300": {"1": [0.83, -0.66], "2": [10.67, 24.36]}, "301": {"1": [0.74, -0.59], "2": [10.53, 24.4]}, "302": {"1": [0.59, -0.55], "2": [10.32, 24.43]}, "303": {"1": [0.41, -0.48], "2": [10.14, 24.54]}, "304": {"1": [0.26, -0.44], "2": [9.97, 24.67]}, "305": {"1": [0.13, -0.41], "2": [9.81, 24.82]}, "306": {"1": [0.06, -0.4], "2": [9.71, 24.93]}, "307": {"1": [0.02, -0.39], "2": [9.59, 25.01]}, "308": {"1": [-0.01, -0.43], "2": [9.44, 25.04]}, "309": {"1": [-0.05, -0.51], "2": [9.23, 25.04]}, "310": {"1": [-0.07, -0.59], "2": [9.0, 25.03]}, "311": {"1": [-0.08, -0.67], "2": [8.81, 25.02]}, "312": {"1": [-0.08, -0.73], "2": [8.7, 25.01]}, "313": {"1": [-0.08, -0.77], "2": [8.63, 25.0]}, "314": {"1": [-0.07, -0.8], "2": [8.51, 24.99]}, "315": {"1": [-0.05, -0.79], "2": [8.38, 24.99]}, "316": {"1": [-0.0, -0.79], "2": [8.19, 24.99]}, "317": {"1": [0.08, -0.79], "2": [7.94, 24.99]}, "318": {"1": [0.15, -0.79], "2": [7.77, 24.99]}, "319": {"1": [0.21, -0.77], "2": [7.55, 24.99]}, "320": {"1": [0.31, -0.78], "2": [7.34, 24.99]}, "321": {"1": [0.45, -0.76], "2": [7.17, 24.99]}, "322": {"1": [0.57, -0.75], "2": [7.01, 24.99]}, "323": {"1": [0.67, -0.71], "2": [6.86, 24.99]}, "324": {"1": [0.73, -0.66], "2": [6.78, 24.99]}, "325": {"1": [0.8, -0.69], "2": [6.68, 24.99]}, "326": {"1": [0.91, -0.68], "2": [6.47, 24.99]}, "327": {"1": [1.08, -0.66], "2": [6.23, 24.99]}, "328": {"1": [1.25, -0.63], "2": [6.01, 24.99]}, "329": {"1": [1.41, -0.68], "2": [5.8, 24.99]}, "330": {"1": [1.49, -0.72], "2": [5.65, 24.99]}, "331": {"1": [1.54, -0.75], "2": [5.51, 24.99]}, "332": {"1": [1.6, -0.75], "2": [5.38, 24.99]}, "333": {"1": [1.68, -0.72], "2": [5.26, 24.99]}, "334": {"1": [1.81, -0.75], "2": [5.12, 24.99]}, "335": {"1": [2.02, -0.76], "2": [4.93, 24.99]}, "336": {"1": [2.15, -0.74], "2": [4.78, 24.99]}, "337": {"1": [2.31, -0.79], "2": [4.63, 24.99]}, "338": {"1": [2.47, -0.86], "2": [4.48, 24.99]}, "339": {"1": [2.61, -0.85], "2": [4.34, 24.99]}, "340": {"1": [2.77, -0.87], "2": [4.2, 24.99]}, "341": {"1": [2.96, -0.75], "2": [4.08, 24.99]}, "342": {"1": [3.07, -0.62], "2": [3.99, 24.99]}, "343": {"1": [3.24, -0.53], "2": [3.91, 24.99]}, "344": {"1": [3.45, -0.47], "2": [3.85, 24.99]}, "345": {"1": [3.63, -0.5], "2": [3.79, 24.99]}, "346": {"1": [3.78, -0.56], "2": [3.75, 24.99]}, "347": {"1": [3.94, -0.82], "2": [3.74, 24.99]}, "348": {"1": [4.01, -0.97], "2": [3.73, 24.99]}, "349": {"1": [4.11, -1.04], "2": [3.72, 24.99]}, "350": {"1": [4.28, -1.07], "2": [3.72, 24.99]}, "351": {"1": [4.51, -1.07], "2": [3.71, 24.99]}, "352": {"1": [4.77, -1.06], "2": [3.71, 24.99]}, "353": {"1": [4.99, -1.04], "2": [3.71, 24.99]}, "354": {"1": [5.09, -1.03], "2": [3.7, 24.99]}, "355": {"1": [5.22, -1.02], "2": [3.71, 24.99]}, "356": {"1": [5.39, -1.02], "2": [3.73, 24.99]}, "357": {"1": [5.57, -1.02], "2": [3.78, 24.99]}, "358": {"1": [5.79, -1.01], "2": [3.85, 24.99]}, "359": {"1": [6.04, -1.01], "2": [3.94, 24.99]}, "360": {"1": [6.18, -1.01], "2": [3.99, 24.99]}, "361": {"1": [6.31, -1.01], "2": [4.04, 24.99]}, "362": {"1": [6.45, -1.02], "2": [4.08, 24.99]}, "363": {"1": [6.63, -1.02], "2": [4.12, 24.99]}, "364": {"1": [6.85, -1.02], "2": [4.16, 24.99]}, "365": {"1": [7.07, -1.02], "2": [4.2, 24.99]}, "366": {"1": [7.2, -1.02], "2": [4.21, 24.99]}, "367": {"1": [7.32, -1.02], "2": [4.22, 24.99]}, "368": {"1": [7.46, -1.02], "2": [4.25, 24.99]}, "369": {"1": [7.65, -1.02], "2": [4.28, 24.99]}, "370": {"1": [7.88, -1.02], "2": [4.34, 24.99]}, "371": {"1": [8.07, -1.02], "2": [4.42, 24.99]}, "372": {"1": [8.16, -1.02], "2": [4.47, 24.99]}, "373": {"1": [8.17, -1.02], "2": [4.54, 24.99]}, "374": {"1": [8.22, -1.02], "2": [4.61, 24.99]}, "375": {"1": [8.33, -1.02], "2": [4.67, 24.99]}, "376": {"1": [8.53, -1.02], "2": [4.76, 24.99]}, "377": {"1": [8.71, -1.02], "2": [4.88, 24.99]}, "378": {"1": [8.82, -1.02], "2": [4.96, 24.99]}, "379": {"1": [8.94, -1.02], "2": [5.05, 24.99]}, "380": {"1": [9.06, -1.02], "2": [5.11, 24.99]}, "381": {"1": [9.16, -1.02], "2": [5.15, 24.99]}, "382": {"1": [9.26, -1.02], "2": [5.17, 24.99]}, "383": {"1": [9.31, -1.02], "2": [5.18, 24.99]}, "384": {"1": [9.32, -1.02], "2": [5.16, 24.99]}, "385": {"1": [9.32, -1.02], "2": [5.15, 24.99]}, "386": {"1": [9.35, -1.02], "2": [5.14, 24.99]}, "387": {"1": [9.41, -1.02], "2": [5.11, 24.99]}, "388": {"1": [9.49, -1.02], "2": [5.09, 24.93]}, "389": {"1": [9.56, -1.02], "2": [5.05, 24.74]}, "390": {"1": [9.59, -1.02], "2": [5.02, 24.58]}, "391": {"1": [9.61, -1.02], "2": [4.98, 24.37]}, "392": {"1": [9.63, -1.02], "2": [4.93, 24.19]}, "393": {"1": [9.63, -1.02], "2": [4.85, 24.07]}, "394": {"1": [9.63, -1.02], "2": [4.74, 24.0]}, "395": {"1": [9.6, -1.02], "2": [4.63, 23.96]}, "396": {"1": [9.56, -1.02], "2": [4.55, 23.94]}, "397": {"1": [9.5, -1.02], "2": [4.47, 23.9]}, "398": {"1": [9.41, -1.02], "2": [4.37, 23.76]}, "399": {"1": [9.27, -1.02], "2": [4.28, 23.67]}, "400": {"1": [9.1, -1.02], "2": [4.21, 23.61]}, "401": {"1": [8.98, -1.02], "2": [4.16, 23.58]}, "402": {"1": [8.9, -1.02], "2": [4.12, 23.58]}, "403": {"1": [8.84, -1.02], "2": [4.09, 23.61]}, "404": {"1": [8.75, -1.02], "2": [4.03, 23.7]}, "405": {"1": [8.66, -1.02], "2": [3.97, 23.79]}, "406": {"1": [8.58, -1.02], "2": [3.91, 23.87]}, "407": {"1": [8.48, -1.02], "2": [3.86, 23.92]}, "408": {"1": [8.39, -1.02], "2": [3.83, 23.94]}, "409": {"1": [8.29, -1.02], "2": [3.79, 23.96]}, "410": {"1": [8.19, -1.02], "2": [3.77, 23.97]}, "411": {"1": [8.1, -1.02], "2": [3.76, 23.98]}, "412": {"1": [8.03, -1.02], "2": [3.76, 23.98]}, "413": {"1": [7.97, -1.02], "2": [3.73, 23.96]}, "414": {"1": [7.93, -1.02], "2": [3.71, 23.95]}, "415": {"1": [7.89, -1.02], "2": [3.65, 23.93]}, "416": {"1": [7.84, -1.02], "2": [3.59, 23.91]}, "417": {"1": [7.76, -1.02], "2": [3.54, 23.9]}, "418": {"1": [7.66, -1.02], "2": [3.49, 23.88]}, "419": {"1": [7.56, -1.02], "2": [3.46, 23.85]}, "420": {"1": [7.49, -1.02], "2": [3.45, 23.83]}, "421": {"1": [7.43, -1.02], "2": [3.45, 23.76]}, "422": {"1": [7.39, -1.02], "2": [3.43, 23.67]}, "423": {"1": [7.36, -1.02], "2": [3.41, 23.63]}, "424": {"1": [7.35, -1.02], "2": [3.37, 23.67]}, "425": {"1": [7.35, -1.02], "2": [3.34, 23.78]}, "426": {"1": [7.36, -1.02], "2": [3.31, 23.87]}, "427": {"1": [7.36, -1.02], "2": [3.29, 23.93]}, "428": {"1": [7.37, -1.02], "2": [3.24, 23.95]}, "429": {"1": [7.4, -1.02], "2": [3.21, 23.95]}, "430": {"1": [7.44, -1.02], "2": [3.2, 23.95]}, "431": {"1": [7.52, -1.02], "2": [3.23, 23.95]}, "432": {"1": [7.59, -1.02], "2": [3.26, 23.95]}, "433": {"1": [7.65, -1.02], "2": [3.31, 23.95]}, "434": {"1": [7.68, -1.02], "2": [3.39, 23.94]}, "435": {"1": [7.7, -1.02], "2": [3.47, 23.93]}, "436": {"1": [7.71, -1.02], "2": [3.56, 23.94]}, "437": {"1": [7.73, -1.02], "2": [3.65, 24.0]}, "438": {"1": [7.75, -1.02], "2": [3.7, 24.05]}, "439": {"1": [7.79, -1.02], "2": [3.74, 24.1]}, "440": {"1": [7.83, -1.02], "2": [3.77, 24.17]}, "441": {"1": [7.87, -1.02], "2": [3.81, 24.24]}, "442": {"1": [7.89, -1.02], "2": [3.85, 24.33]}, "443": {"1": [7.88, -1.02], "2": [3.88, 24.42]}, "444": {"1": [7.88, -1.02], "2": [3.9, 24.47]}, "445": {"1": [7.87, -0.94], "2": [3.92, 24.5]}, "446": {"1": [7.85, -0.94], "2": [3.97, 24.51]}, "447": {"1": [7.85, -0.96], "2": [4.05, 24.51]}, "448": {"1": [7.86, -0.99], "2": [4.16, 24.47]}, "449": {"1": [7.88, -1.0], "2": [4.28, 24.42]}, "450": {"1": [7.89, -1.01], "2": [4.36, 24.39]}, "451": {"1": [7.87, -1.02], "2": [4.42, 24.4]}, "452": {"1": [7.81, -1.02], "2": [4.49, 24.43]}, "453": {"1": [7.74, -1.02], "2": [4.55, 24.51]}, "454": {"1": [7.66, -1.01], "2": [4.64, 24.62]}, "455": {"1": [7.58, -1.01], "2": [4.74, 24.75]}, "456": {"1": [7.52, -1.01], "2": [4.81, 24.84]}, "457": {"1": [7.48, -1.02], "2": [4.89, 24.91]}, "458": {"1": [7.46, -1.02], "2": [4.95, 24.99]}, "459": {"1": [7.45, -1.02], "2": [5.01, 25.02]}, "460": {"1": [7.44, -1.02], "2": [5.06, 25.03]}, "461": {"1": [7.43, -1.02], "2": [5.1, 25.02]}, "462": {"1": [7.42, -1.01], "2": [5.12, 25.01]}, "463": {"1": [7.44, -1.0], "2": [5.12, 25.0]}, "464": {"1": [7.48, -1.01], "2": [5.11, 25.0]}, "465": {"1": [7.54, -1.01], "2": [5.07, 24.99]}, "466": {"1": [7.58, -1.0], "2": [5.02, 24.99]}, "467": {"1": [7.59, -1.0], "2": [4.96, 24.99]}, "468": {"1": [7.6, -1.0], "2": [4.91, 24.99]}, "469": {"1": [7.57, -1.0], "2": [4.84, 24.99]}, "470": {"1": [7.5, -0.98], "2": [4.73, 24.98]}, "471": {"1": [7.43, -0.93], "2": [4.57, 24.95]}, "472": {"1": [7.36, -0.9], "2": [4.41, 24.97]}, "473": {"1": [7.28, -0.89], "2": [4.25, 24.98]}, "474": {"1": [7.21, -0.9], "2": [4.15, 24.98]}, "475": {"1": [7.14, -0.9], "2": [4.1, 24.99]}, "476": {"1": [7.07, -0.89], "2": [4.07, 24.99]}, "477": {"1": [7.01, -0.82], "2": [3.99, 24.99]}, "478": {"1": [6.97, -0.77], "2": [3.9, 24.99]}, "479": {"1": [6.96, -0.76], "2": [3.77, 24.99]}, "480": {"1": [6.94, -0.76], "2": [3.66, 24.99]}, "481": {"1": [6.93, -0.76], "2": [3.56, 24.99]}, "482": {"1": [6.92, -0.75], "2": [3.47, 24.99]}, "483": {"1": [6.9, -0.74], "2": [3.37, 24.99]}, "484": {"1": [6.88, -0.72], "2": [3.25, 24.99]}, "485": {"1": [6.86, -0.67], "2": [3.12, 24.99]}, "486": {"1": [6.84, -0.63], "2": [3.02, 24.99]}, "487": {"1": [6.83, -0.53], "2": [2.95, 24.99]}, "488": {"1": [6.82, -0.39], "2": [2.88, 24.99]}, "489": {"1": [6.8, -0.18], "2": [2.81, 24.99]}, "490": {"1": [6.79, 0.03], "2": [2.74, 24.99]}, "491": {"1": [6.78, 0.19], "2": [2.72, 24.99]}, "492": {"1": [6.77, 0.26], "2": [2.72, 24.99]}, "493": {"1": [6.77, 0.28], "2": [2.72, 24.99]}, "494": {"1": [6.77, 0.28], "2": [2.7, 24.99]}, "495": {"1": [6.78, 0.27], "2": [2.68, 24.99]}, "496": {"1": [6.84, 0.24], "2": [2.67, 24.99]}, "497": {"1": [6.93, 0.21], "2": [2.66, 24.99]}, "498": {"1": [7.01, 0.18], "2": [2.65, 24.99]}, "499": {"1": [7.09, 0.16], "2": [2.64, 24.99]}, "500": {"1": [7.16, 0.28], "2": [2.65, 24.99]}, "501": {"1": [7.23, 0.37], "2": [2.68, 24.99]}, "502": {"1": [7.29, 0.51], "2": [2.71, 24.99]}, "503": {"1": [7.32, 0.7], "2": [2.75, 24.99]}, "504": {"1": [7.34, 0.8], "2": [2.77, 24.99]}, "505": {"1": [7.34, 1.12], "2": [2.79, 24.99]}, "506": {"1": [7.33, 1.43], "2": [2.8, 24.99]}, "507": {"1": [7.31, 1.61], "2": [2.81, 24.99]}, "508": {"1": [7.29, 1.7], "2": [2.82, 24.99]}, "509": {"1": [7.27, 1.75], "2": [2.83, 24.99]}, "510": {"1": [7.27, 1.72], "2": [2.85, 24.99]}, "511": {"1": [7.27, 1.67], "2": [2.87, 24.99]}, "512": {"1": [7.25, 1.74], "2": [2.9, 24.99]}, "513": {"1": [7.24, 1.89], "2": [2.94, 24.99]}, "514": {"1": [7.23, 2.14], "2": [2.98, 24.99]}, "515": {"1": [7.21, 2.35], "2": [3.03, 24.99]}, "516": {"1": [7.21, 2.47], "2": [3.06, 24.99]}, "517": {"1": [7.22, 2.56], "2": [3.09, 24.99]}, "518": {"1": [7.21, 2.74], "2": [3.13, 24.99]}, "519": {"1": [7.18, 3.04], "2": [3.2, 24.99]}, "520": {"1": [7.21, 3.26], "2": [3.28, 24.99]}, "521": {"1": [7.26, 3.39], "2": [3.39, 24.99]}, "522": {"1": [7.32, 3.42], "2": [3.47, 24.99]}, "523": {"1": [7.36, 3.4], "2": [3.53, 24.99]}, "524": {"1": [7.39, 3.39], "2": [3.6, 24.99]}, "525": {"1": [7.41, 3.27], "2": [3.66, 24.99]}, "526": {"1": [7.44, 3.16], "2": [3.72, 24.99]}, "527": {"1": [7.54, 3.11], "2": [3.78, 24.99]}, "528": {"1": [7.65, 3.1], "2": [3.82, 24.99]}, "529": {"1": [7.76, 3.15], "2": [3.86, 24.99]}, "530": {"1": [7.82, 3.34], "2": [3.96, 24.99]}, "531": {"1": [7.86, 3.6], "2": [4.09, 24.99]}, "532": {"1": [7.88, 3.91], "2": [4.21, 24.99]}, "533": {"1": [7.9, 4.27], "2": [4.31, 24.99]}, "534": {"1": [7.92, 4.51], "2": [4.37, 24.99]}, "535": {"1": [7.94, 4.6], "2": [4.4, 24.99]}, "536": {"1": [7.94, 4.6], "2": [4.41, 24.99]}, "537": {"1": [7.94, 4.57], "2": [4.42, 24.99]}, "538": {"1": [7.91, 4.52], "2": [4.46, 24.99]}, "539": {"1": [7.87, 4.49], "2": [4.54, 24.99]}, "540": {"1": [7.86, 4.46], "2": [4.6, 24.99]}, "541": {"1": [7.83, 4.62], "2": [4.69, 24.99]}, "542": {"1": [7.79, 4.92], "2": [4.8, 24.99]}, "543": {"1": [7.74, 5.2], "2": [4.94, 24.99]}, "544": {"1": [7.69, 5.46], "2": [5.07, 24.99]}, "545": {"1": [7.63, 5.68], "2": [5.17, 24.99]}, "546": {"1": [7.64, 5.81], "2": [5.23, 24.99]}, "547": {"1": [7.62, 5.88], "2": [5.27, 24.99]}, "548": {"1": [7.59, 5.89], "2": [5.32, 24.99]}, "549": {"1": [7.56, 5.87], "2": [5.39, 24.99]}, "550": {"1": [7.53, 5.86], "2": [5.45, 24.99]}, "551": {"1": [7.51, 5.81], "2": [5.5, 24.99]}, "552": {"1": [7.53, 5.76], "2": [5.56, 24.99]}, "553": {"1": [7.53, 5.75], "2": [5.61, 24.99]}, "554": {"1": [7.52, 5.78], "2": [5.67, 24.99]}, "555": {"1": [7.48, 5.92], "2": [5.76, 24.99]}, "556": {"1": [7.45, 6.07], "2": [5.86, 24.99]}, "557": {"1": [7.42, 6.37], "2": [5.96, 24.99]}, "558": {"1": [7.42, 6.61], "2": [6.03, 24.99]}, "559": {"1": [7.4, 6.8], "2": [6.08, 24.99]}, "560": {"1": [7.38, 6.88], "2": [6.12, 24.99]}, "561": {"1": [7.35, 6.89], "2": [6.18, 24.99]}, "562": {"1": [7.33, 6.86], "2": [6.22, 24.99]}, "563": {"1": [7.29, 6.81], "2": [6.25, 24.99]}, "564": {"1": [7.28, 6.76], "2": [6.27, 24.99]}, "565": {"1": [7.25, 6.73], "2": [6.3, 24.99]}, "566": {"1": [7.21, 6.74], "2": [6.33, 24.99]}, "567": {"1": [7.18, 6.82], "2": [6.42, 24.99]}, "568": {"1": [7.13, 6.9], "2": [6.51, 24.99]}, "569": {"1": [7.09, 6.98], "2": [6.59, 24.99]}}, "fps": 30.0, "surface_colour": "#12303a", "note": "Each arc is one free-flight reconstruction between detected events. Speed is the average over the flight, so it reads at or just below a radar gun, which measures at contact. Drag and spin are not modelled."};
+const L = DATA.court.length, W = DATA.court.width, WS = DATA.court.singles_width;
+const SVC = DATA.court.service_from_net, NETC = DATA.court.net_centre,
+      NETP = DATA.court.net_post, POST_OUT = DATA.court.post_outside;
+const CX = W / 2, CY = L / 2, NETY = L / 2;
+
+/* ---------- court geometry ---------- */
+function courtLines() {
+  const xm = (W - WS) / 2, xM = W - xm, seg = [];
+  const add = (a, b) => seg.push([a, b]);
+  add([0,0,0],[W,0,0]); add([0,L,0],[W,L,0]);
+  add([0,0,0],[0,L,0]); add([W,0,0],[W,L,0]);
+  add([xm,0,0],[xm,L,0]); add([xM,0,0],[xM,L,0]);
+  add([xm,NETY-SVC,0],[xM,NETY-SVC,0]); add([xm,NETY+SVC,0],[xM,NETY+SVC,0]);
+  add([W/2,NETY-SVC,0],[W/2,NETY+SVC,0]);
+  // Baseline centre marks
+  add([W/2,0,0],[W/2,0.3,0]); add([W/2,L,0],[W/2,L-0.3,0]);
+  return seg;
+}
+const LINES = courtLines();
+
+// Net tape as a catenary-ish curve with zero slope at the posts, so it does not kink
+// where it meets them. Posts sit outside the doubles sidelines, as on a real court.
+// Player ids in a stable order, so the two colours do not swap between frames.
+const PLAYER_IDS = (() => {
+  const ids = new Set();
+  for (const f of Object.keys(DATA.players || {})) {
+    for (const pid of Object.keys(DATA.players[f])) ids.add(pid);
+  }
+  return [...ids].sort();
+})();
+
+const PLAYER_FRAMES = Object.keys(DATA.players || {}).map(Number).sort((a, b) => a - b);
+
+function playersAt(seconds) {
+  // Nearest labelled frame rather than interpolation: player tracks have gaps, and an
+  // interpolated position across a gap would be a claim the tracker never made.
+  if (!DATA.players || !PLAYER_FRAMES.length || !DATA.fps) return [];
+  const want = seconds * DATA.fps;
+  let lo = 0, hi = PLAYER_FRAMES.length - 1, best = PLAYER_FRAMES[0];
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (Math.abs(PLAYER_FRAMES[mid] - want) < Math.abs(best - want)) best = PLAYER_FRAMES[mid];
+    if (PLAYER_FRAMES[mid] < want) lo = mid + 1; else hi = mid - 1;
+  }
+  // Too far from any tracked frame means the player was not tracked here. Draw nothing
+  // rather than a stale marker sitting where they no longer are.
+  if (Math.abs(best - want) > DATA.fps * 0.5) return [];
+  return Object.entries(DATA.players[String(best)] || {});
+}
+
+function ringOnGround(x, y, r, colour) {
+  const pts = [];
+  for (let i = 0; i <= 20; i++) {
+    const a = i / 20 * Math.PI * 2;
+    pts.push([x + r * Math.cos(a), y + r * Math.sin(a), 0]);
+  }
+  strokePath(pts, colour, 2);
+}
+
+function netCurve() {
+  const x0 = -POST_OUT, x1 = W + POST_OUT, pts = [];
+  for (let i = 0; i <= 28; i++) {
+    const t = i / 28;
+    pts.push([x0 + (x1 - x0) * t, NETY, NETP + (NETC - NETP) * (1 - Math.cos(2*Math.PI*t)) / 2]);
+  }
+  return pts;
+}
+const NET = netCurve();
+
+/* ---------- camera ---------- */
+const VIEWS = {
+  broadcast:{az:0.0, polar:0.62, dist:38}, side:{az:1.57, polar:0.95, dist:34},
+  top:{az:0.0, polar:0.12, dist:34},       baseline:{az:0.0, polar:1.25, dist:30},
+};
+
+// Opens near the side line, not on the broadcast angle. Looking straight down the court
+// is the familiar television framing and it is the worst view for this page: it
+// compresses ball height to almost nothing, which is the one thing a 3-D reconstruction
+// exists to show. From the side an arc reads as an arc.
+//
+// Slightly off pure side (1.32 rather than 1.57) so the court still has some depth and
+// does not collapse to a flat rectangle. A full three-quarter angle was tried and looked
+// worse: the court sits diagonally across the canvas and reads as neither view.
+// Broadcast remains one click away for comparing against the video.
+let cam = {az: 1.32, polar: 0.86, dist: 34};
+let basis = null;             // trig hoisted out of the per-point hot path
+function updateBasis() {
+  const ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  const cp = Math.cos(cam.polar), sp = Math.sin(cam.polar);
+  basis = {ca, sa, cp, sp};
+}
+let VW = 0, VH = 0, FSCALE = 0;
+
+function project(p) {
+  const {ca, sa, cp, sp} = basis;
+  const x = p[0] - CX, y = p[1] - CY, z = p[2];
+  const X = x * ca - y * sa, Y = x * sa + y * ca;
+  const Z = Y * sp + z * cp, Yc = -Y * cp + z * sp;
+  const depth = Z + cam.dist;
+  if (depth <= 0.6) return null;
+  return [VW/2 + FSCALE * X / depth, VH/2 - FSCALE * Yc / depth, depth];
+}
+
+/* ---------- state ---------- */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let selected = 0, playing = false, tNorm = 0, rate = 1, zoom = 1, showAll = false;
+const TOTAL = DATA.segments.length ? Math.max(...DATA.segments.map(s => s.end_s)) : 1;
+
+let pending = false;
+function requestDraw() {                    // rAF throttle: pointer events fire far
+  if (pending) return;                      // faster than the display refreshes, and a
+  pending = true;                           // full redraw per event is what made the
+  requestAnimationFrame(() => { pending = false; draw(); });   // drag feel sluggish.
+}
+
+// Corners of the playing area plus the net posts and a generous overhead allowance.
+// Fitting to these rather than to the ball arcs keeps the framing stable: an unusually
+// high lob should not shrink the court for the whole clip.
+function fitPoints() {
+  const pts = [];
+  for (const x of [-POST_OUT, W + POST_OUT]) {
+    for (const y of [0, L]) {
+      pts.push([x, y, 0]);
+      pts.push([x, y, 3.0]);
+    }
+  }
+  return pts;
+}
+
+// Scale that makes the court fill the canvas, at any orbit angle and any aspect ratio.
+// The previous version used 0.9 * min(width, height), which ignored the width entirely:
+// on a 1600x900 window the court rendered into roughly a fifth of the available area and
+// the rest was empty. Projecting the court at unit scale and solving for the factor that
+// fits it means the framing is correct for every view preset and every window shape.
+function fitScale() {
+  // Self-sufficient: resize() runs at page init before any draw, so the trig basis may
+  // still be null here. Without this the very first call throws inside project() and the
+  // canvas never paints at all.
+  updateBasis();
+  const saved = FSCALE;
+  FSCALE = 1;
+  let maxX = 1e-6, maxY = 1e-6;
+  for (const p of fitPoints()) {
+    const P = project(p);
+    if (!P) continue;
+    maxX = Math.max(maxX, Math.abs(P[0] - VW / 2));
+    maxY = Math.max(maxY, Math.abs(P[1] - VH / 2));
+  }
+  FSCALE = saved;
+  // 0.86 leaves a margin so the baselines do not touch the edges.
+  return Math.min(VW / 2 / maxX, VH / 2 / maxY) * 0.86;
+}
+
+function resize() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  VW = Math.round(r.width); VH = Math.round(r.height);
+  cv.width = Math.round(VW * dpr); cv.height = Math.round(VH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  FSCALE = 1;
+  FSCALE = fitScale() * zoom;
+  requestDraw();
+}
+addEventListener('resize', resize);
+
+/* ---------- drawing ---------- */
+function strokePath(points, colour, width, dash) {
+  ctx.strokeStyle = colour; ctx.lineWidth = width;
+  ctx.setLineDash(dash || []);
+  ctx.beginPath();
+  let started = false, drew = false;
+  for (const p of points) {
+    const P = project(p);
+    if (!P) { started = false; continue; }
+    if (!started) { ctx.moveTo(P[0], P[1]); started = true; }
+    else { ctx.lineTo(P[0], P[1]); drew = true; }
+  }
+  if (drew) ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// Index of the flight running at `t`, or the most recent one that has ended. Returns
+// -1 before the first flight begins.
+function heldSegment(t) {
+  let best = -1, bestEnd = -Infinity;
+  DATA.segments.forEach((s, i) => {
+    if (t >= s.start_s && t < s.end_s) { best = i; bestEnd = Infinity; }
+    else if (bestEnd !== Infinity && s.end_s <= t && s.end_s > bestEnd) {
+      best = i; bestEnd = s.end_s;
+    }
+  });
+  return best;
+}
+
+function meanDepth(points) {
+  let sum = 0, n = 0;
+  for (const p of points) { const P = project(p); if (P) { sum += P[2]; n++; } }
+  return n ? sum / n : Infinity;
+}
+
+function draw() {
+  updateBasis();
+  // Refit every frame: orbiting changes the court's projected extent, and a scale fixed
+  // at resize time would leave the court small at some angles and clipped at others.
+  // fitScale projects sixteen points, so this costs nothing measurable.
+  FSCALE = fitScale() * zoom;
+  ctx.clearRect(0, 0, VW, VH);
+  ctx.lineJoin = ctx.lineCap = 'round';
+
+  // Court surface
+  const quad = [[0,0,0],[W,0,0],[W,L,0],[0,L,0]].map(project);
+  if (quad.every(Boolean)) {
+    ctx.fillStyle = DATA.surface_colour;
+    ctx.beginPath(); ctx.moveTo(quad[0][0], quad[0][1]);
+    quad.slice(1).forEach(c => ctx.lineTo(c[0], c[1]));
+    ctx.closePath(); ctx.fill();
+  }
+  // Boundary lines carry more weight than the interior ones. Drawing all eleven at the
+  // same weight made the court read as a grid and put the service lines in direct
+  // competition with the ball arcs, which are the point of the view.
+  LINES.forEach(([a, b], i) => {
+    const boundary = i < 4;
+    strokePath([a, b], boundary ? 'rgba(228,242,247,.92)' : 'rgba(190,212,222,.45)',
+               boundary ? 2.0 : 1.1);
+  });
+
+  // Ground shadow of every arc: the cheapest way to make height legible without
+  // orbiting, because a flat arc against a flat court reads as no height at all.
+  // Shadow only the arc under examination. Seventeen shadows plus seventeen arcs was
+  // twice the ink for the same information, and the shadow is a height cue for the arc
+  // you are reading, not for the whole rally at once.
+  DATA.segments.forEach((s, i) => {
+    const lit = i === selected || i === heldSegment(tNorm * TOTAL);
+    if (lit) strokePath(s.points.map(p => [p[0], p[1], 0]), 'rgba(0,0,0,.45)', 1.4);
+  });
+
+  // Depth-sort the arcs against the net so a ball behind the net renders behind it.
+  // Drawing arcs last unconditionally made every ball appear in front of the tape -
+  // and "did it clear the net" is the question this view exists to answer.
+  const drawables = DATA.segments.map((s, i) => ({kind:'arc', i, s, d: meanDepth(s.points)}));
+  drawables.push({kind:'net', d: meanDepth(NET)});
+
+  // Players at the current instant, if the court fit was trusted. Their FEET are the
+  // one position the floor homography places exactly: a standing player is on the
+  // ground by definition, while the ball is floor-valid only at a bounce or a contact.
+  // So these are drawn as ground markers with a height cue rather than as bodies. The
+  // position is evidence; a body would be decoration, and this viewer does not decorate.
+  const nowPlayers = playersAt(tNorm * TOTAL);
+  for (const [pid, pos] of nowPlayers) {
+    drawables.push({kind:'player', pid, pos, d: meanDepth([[pos[0], pos[1], 0]])});
+  }
+
+  drawables.sort((a, b) => b.d - a.d);
+
+  const tNow = tNorm * TOTAL;
+  for (const item of drawables) {
+    if (item.kind === 'player') {
+      const [x, y] = item.pos;
+      // A ring on the ground plus a short vertical stem. The ring says where, and the
+      // stem gives the eye something to judge depth against, without implying we know
+      // anything about the player's pose, which we do not.
+      const col = item.pid === PLAYER_IDS[0] ? '#5ad2a0' : '#e3a13d';
+      ringOnGround(x, y, 0.45, col);
+      strokePath([[x, y, 0], [x, y, 1.75]], col + 'aa', 2);
+      const head = project([x, y, 1.75]);
+      if (head) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(head[0], head[1], Math.max(2.5, FSCALE * 0.05 / head[2]), 0, 2*Math.PI);
+        ctx.fill();
+      }
+      continue;
+    }
+    if (item.kind === 'net') {
+      // Net as a surface, not just a tape: two posts, the curve, and vertical mesh.
+      strokePath([[-POST_OUT,NETY,0],[-POST_OUT,NETY,NETP]], '#cfd8dd', 2.4);
+      strokePath([[W+POST_OUT,NETY,0],[W+POST_OUT,NETY,NETP]], '#cfd8dd', 2.4);
+      for (let i = 0; i <= 28; i += 2) {
+        const p = NET[i];
+        strokePath([[p[0],NETY,0],[p[0],NETY,p[2]]], 'rgba(200,215,225,.28)', 1);
+      }
+      strokePath(NET, '#eef4f7', 2.2);
+      continue;
+    }
+    const {i, s} = item;
+    const on = i === selected;
+    // "Active" holds through the gaps between flights. A rally is not continuous
+    // flight: the ball is being struck, or a reconstruction did not pass its physical
+    // gates, and on the reference clip that leaves 34% of the timeline with no segment
+    // running and up to two seconds of empty court. Holding the most recent flight
+    // keeps the view continuous without inventing anything, since it shows a real
+    // reconstruction rather than an interpolation across the gap.
+    const active = i === heldSegment(tNow);
+    // Depth fog: far arcs recede instead of every arc reading at the same weight.
+    const fade = Math.max(0.25, Math.min(1, 34 / item.d));
+    // Seventeen arcs at similar weight read as spaghetti and hide the one being
+    // examined. Context arcs are dropped to a faint trace so the rally is still legible
+    // as a whole, while the selected and playing arcs carry the weight. Measured on the
+    // reference clip, which has 17 flight segments over 19 seconds.
+    // Context arcs are hidden unless asked for. Sixteen faint traces crossing the court
+    // read as scratches on the lens rather than as a rally, and they compete with the
+    // one arc actually being examined. "All flights" brings them back for anyone who
+    // wants the whole point at once.
+    if (!on && !active && !showAll) continue;
+    const context = Math.max(0.10, 0.16 * fade);
+    const colour = on ? '#4ec9b0'
+                 : active ? '#ffa657'
+                 : `rgba(126,166,188,${context.toFixed(2)})`;
+    strokePath(s.points, colour, on ? 3.4 : active ? 3.0 : 1.0);
+
+    // Endpoint dots on the highlighted arc: a flight begins and ends at a real detected
+    // event, and marking them says where the evidence actually is.
+    if (on || active) {
+      for (const end of [s.points[0], s.points[s.points.length - 1]]) {
+        const E = project(end);
+        if (!E) continue;
+        ctx.fillStyle = on ? '#4ec9b0' : '#ffa657';
+        ctx.beginPath();
+        ctx.arc(E[0], E[1], Math.max(2.5, FSCALE * 0.035 / E[2]), 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
+    const trulyFlying = tNow >= s.start_s && tNow < s.end_s;
+    if (trulyFlying && s.points.length > 1) {
+      const f = (tNow - s.start_s) / Math.max(s.end_s - s.start_s, 1e-6);
+      const idx = Math.min(s.points.length - 1, Math.floor(f * (s.points.length - 1)));
+      const P = project(s.points[idx]);
+      if (P) {
+        ctx.fillStyle = '#ffd166';
+        ctx.beginPath(); ctx.arc(P[0], P[1], Math.max(3, FSCALE * 0.06 / P[2]), 0, 2*Math.PI);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+/* ---------- interaction ---------- */
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  drag = {x:e.clientX, y:e.clientY, moved:false};
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointerup', e => {
+  if (drag && !drag.moved) pickAt(e);      // a click that never dragged selects an arc
+  drag = null;
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
+  cam.az += (e.clientX - drag.x) * 0.006;
+  cam.polar = Math.max(0.06, Math.min(1.45, cam.polar + (e.clientY - drag.y) * 0.005));
+  drag.x = e.clientX; drag.y = e.clientY;
+  requestDraw();
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoom = Math.max(0.45, Math.min(4.0, zoom * (1 - Math.sign(e.deltaY) * 0.09)));
+  FSCALE = fitScale() * zoom;
+  requestDraw();
+}, {passive:false});
+
+function pickAt(e) {
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = -1, bestD = 14;
+  DATA.segments.forEach((s, i) => {
+    for (const p of s.points) {
+      const P = project(p);
+      if (!P) continue;
+      const d = Math.hypot(P[0] - mx, P[1] - my);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+  });
+  if (best >= 0) select(best);
+}
+
+/* ---------- segment list ---------- */
+const list = document.getElementById('list');
+if (!DATA.segments.length) {
+  list.innerHTML = '<div class="empty">No flight segments passed the physical gates ' +
+    'for this clip.<br><br>That means the court fit, the flight timing or the event ' +
+    'detection did not meet the bar - so nothing is shown rather than something ' +
+    'unreliable.</div>';
+}
+DATA.segments.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.className = 'seg'; b.setAttribute('aria-selected', 'false');
+  // A speed is only shown where it means "how fast the ball left the racket". A
+  // post-bounce leg is real geometry and not a shot, so it gets its kind instead of a
+  // number, and an uncertain one is marked rather than printed to the km/h.
+  const shown = (s.speed_status === 'valid' || s.speed_status === 'plausible_but_uncertain');
+  const speedText = shown
+    ? `${s.speed_kmh.toFixed(0)} km/h${s.speed_status === 'plausible_but_uncertain' ? ' ?' : ''}`
+    : (s.speed_status === 'not_a_shot' ? 'after bounce' : 'not a shot speed');
+  b.innerHTML =
+    `<span class="top"><span class="name">${s.label}</span>` +
+    `<span class="kmh">${speedText}</span></span>` +
+    `<span class="sub2">apex ${s.apex_m.toFixed(1)} m · ` +
+    `${(s.end_s - s.start_s).toFixed(2)} s · f${s.start_frame}–${s.end_frame}</span>` +
+    `<details><summary>evidence</summary>` +
+    s.evidence.map(e => `<div class="ev">• ${e}</div>`).join('') +
+    (s.speed_status_reason ? `<div class="ev">• ${s.speed_status_reason}</div>` : '') +
+    `</details>`;
+  b.onclick = () => select(i);
+  list.appendChild(b);
+});
+
+function select(i) {
+  selected = i;
+  [...list.querySelectorAll('.seg')].forEach((c, j) =>
+    c.setAttribute('aria-selected', String(j === i)));
+  const card = list.querySelectorAll('.seg')[i];
+  if (card) card.scrollIntoView({block:'nearest'});
+  const s = DATA.segments[i];
+  if (s) { tNorm = s.start_s / TOTAL; scrub.value = tNorm * 1000; updateTime(); }
+  requestDraw();
+}
+
+const note = document.getElementById('note');
+note.innerHTML = (DATA.court_valid ? '' : '<span class="warn">COURT FIT FAILED ' +
+  'VALIDATION - positions and speeds below are NOT measurements.</span><br><br>') +
+  DATA.note;
+
+/* ---------- timeline ---------- */
+const scrub = document.getElementById('scrub'), tlabel = document.getElementById('tlabel');
+const ticks = document.getElementById('ticks');
+DATA.segments.forEach(s => {                 // segment spans, so gaps are visible
+  const i = document.createElement('i');
+  i.style.left = (100 * s.start_s / TOTAL) + '%';
+  i.style.width = Math.max(0.6, 100 * (s.end_s - s.start_s) / TOTAL) + '%';
+  ticks.appendChild(i);
+});
+function updateTime() { tlabel.textContent = (tNorm * TOTAL).toFixed(1) + ' s'; }
+scrub.oninput = () => { setPlaying(false); tNorm = scrub.value / 1000; updateTime(); requestDraw(); };
+document.getElementById('rate').onchange = e => rate = parseFloat(e.target.value);
+
+const playBtn = document.getElementById('play');
+let last = 0;
+function setPlaying(on) {
+  playing = on; playBtn.textContent = on ? '❚❚ Pause' : '▶ Play';
+  last = 0;                                  // reset, or the first frame after a pause
+  if (on) requestAnimationFrame(tick);       // advances by the whole pause duration
+}
+playBtn.onclick = () => setPlaying(!playing);
+function tick(ts) {
+  if (!playing) return;
+  if (last) {
+    tNorm += rate * (ts - last) / 1000 / Math.max(TOTAL, 0.001);
+    if (tNorm > 1) tNorm = 0;
+    scrub.value = tNorm * 1000; updateTime(); draw();
+  }
+  last = ts; requestAnimationFrame(tick);
+}
+
+/* ---------- views, keyboard, tabs ---------- */
+document.querySelectorAll('[data-view]').forEach(b =>
+  b.onclick = () => { cam = {...VIEWS[b.dataset.view]}; requestDraw(); });
+const showAllBtn = document.getElementById('showall');
+showAllBtn.onclick = () => {
+  showAll = !showAll;
+  showAllBtn.classList.toggle('active', showAll);
+  requestDraw();
+};
+document.getElementById('reset').onclick = () => { cam = {az: 1.32, polar: 0.86, dist: 34}; zoom = 1; requestDraw(); };
+
+addEventListener('keydown', e => {
+  const k = e.key;
+  if (k === ' ') { e.preventDefault(); setPlaying(!playing); }
+  else if (k === 'ArrowLeft')  cam.az -= 0.08;
+  else if (k === 'ArrowRight') cam.az += 0.08;
+  else if (k === 'ArrowUp')    cam.polar = Math.max(0.06, cam.polar - 0.06);
+  else if (k === 'ArrowDown')  cam.polar = Math.min(1.45, cam.polar + 0.06);
+  else if (k === '+' || k === '=') { zoom = Math.min(4.0, zoom * 1.09); FSCALE = fitScale() * zoom; }
+  else if (k === '-') { zoom = Math.max(0.45, zoom / 1.09); FSCALE = fitScale() * zoom; }
+  else if (k === 'r' || k === 'R') cam = {...VIEWS.broadcast};
+  else return;
+  requestDraw();
+});
+
+const vid = document.getElementById('vid'), b3 = document.getElementById('btn3d'),
+      bv = document.getElementById('btnVideo'), hint = document.getElementById('hint');
+if (!DATA.video) { bv.disabled = true; bv.title = 'no annotated video alongside this file'; }
+vid.onerror = () => { bv.disabled = true; hint.textContent = 'annotated video not found next to this page'; b3.onclick(); };
+b3.onclick = () => {
+  vid.pause(); cv.classList.remove('hidden'); vid.classList.add('hidden');
+  b3.classList.add('active'); bv.classList.remove('active');
+  hint.textContent = 'drag orbit · scroll zoom · arrows/space/R'; resize();
+};
+bv.onclick = () => {
+  if (DATA.video && !vid.src) vid.src = DATA.video;   // lazy: don't fetch on page load
+  setPlaying(false);
+  vid.currentTime = tNorm * TOTAL;                    // keep both clocks in step
+  vid.classList.remove('hidden'); cv.classList.add('hidden');
+  bv.classList.add('active'); b3.classList.remove('active');
+  hint.textContent = 'video and 3D share the same timeline';
+};
+vid.addEventListener('timeupdate', () => {
+  if (vid.classList.contains('hidden')) return;
+  tNorm = Math.min(1, vid.currentTime / Math.max(TOTAL, 0.001));
+  scrub.value = tNorm * 1000; updateTime();
+});
+
+resize(); updateTime();
+</script>
+</body>
+</html>

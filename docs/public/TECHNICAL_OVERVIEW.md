@@ -596,6 +596,12 @@ small terms while the large one goes unaddressed.
 Every quality verdict carries a plain-language reason, so a consumer can act on it without
 reading this document.
 
+The repository also includes a [public 3-D viewer artifact](media/tennis_vision_3d_viewer.html)
+and an [animated preview](media/3d_reconstruction.gif). The viewer is the same self-contained
+renderer described above: it exposes the court, reconstructed flights, segment selection,
+timeline playback, camera views and per-segment evidence. The public copy omits the local
+broadcast-video reference, but its 3-D scene and evidence payload are unchanged.
+
 ---
 
 ## The evidence and refusal system
