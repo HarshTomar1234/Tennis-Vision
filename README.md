@@ -7,7 +7,7 @@ Tennis match analysis from a single broadcast camera: ball tracking, court geome
 player tracking, shot classification and 3-D trajectory reconstruction.
 
 <div align="center">
-  <img src="frame_images/tennis_analysis_quarter_frame53.png" width="820" alt="Annotated output frame">
+  <img src="frame_images/tennis_analysis_middle_frame107.png" width="820" alt="Annotated output frame">
 </div>
 
 ## The one thing that makes this different
