@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Tennis-Vision! This document prov
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - Git
 - Basic understanding of computer vision and machine learning
 - Familiarity with PyTorch and OpenCV
@@ -79,9 +79,8 @@ Before creating an issue, please:
    # Run tests
    pytest tests/
    
-   # Check code style
-   black --check .
-   flake8 .
+   # Run the same defect checks as CI
+   ruff check --select=E9,F821,F811,F823 .
    ```
 
 4. **Commit and push**

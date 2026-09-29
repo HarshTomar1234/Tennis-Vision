@@ -11,6 +11,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Replaced the README hero frame that displayed a stale `nan` value with a clean tracked
+  output frame.
+- Updated contributor prerequisites to match the package's Python 3.10 minimum and the
+  Ruff checks enforced by CI.
+
+---
+
 ## [2.1.1] - 2026-09-07
 
 Two defects that broke the documented first-run path for every new user, and were
