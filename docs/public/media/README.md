@@ -11,8 +11,9 @@ These files are presentation artifacts from the real Tennis-Vision demo run.
 - `tennis_vision_3d_viewer.png` is a static fallback for environments that do not render
   animated media.
 
-The source run is the reference clip `input_videos/input_video_2.mp4`. The generated
-viewer and summary are assembled by `scripts/build_demo_pack.py`; the preview is captured
+The preview was generated from a local reference run using `input_videos/input_video_2.mp4`;
+that source footage is not redistributed. The generated viewer and summary are assembled by
+`scripts/build_demo_pack.py`; the preview is captured
 by `scripts/capture_viewer_preview.mjs` and packaged by
 `scripts/package_public_viewer.mjs`.
 
