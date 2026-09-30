@@ -103,6 +103,8 @@ plausible-looking numbers.
 git clone https://github.com/HarshTomar1234/Tennis-Vision.git
 cd Tennis-Vision
 
+Place a permitted tennis video at `input_videos/input_video_2.mp4` before running the analysis command.
+
 python -m venv venv
 source venv/bin/activate            # Windows: venv\Scripts\activate
 pip install -e .
